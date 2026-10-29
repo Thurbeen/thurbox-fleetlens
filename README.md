@@ -4,20 +4,11 @@ A [thurbox](https://github.com/Thurbeen/thurbox) pane that browses
 [Fleet](https://github.com/Thurbeen/fleet) v2 resources: every kind Fleet
 serves, Tasks first, in one keyboard-first float.
 
-```text
-╭ Fleet Lens ───────────────────────────────────────────────────────────────╮
-│ local · fleet's default config  · fleet 2.3.0                             │
-│ KINDS             Task 2  · attention first                               │
-│▸ Task          2    NAME     PHASE    COND  SESSION     GEN  RESULT CR AGE│
-│  TaskConfig         alpha    Pending  ○     -           -    -      -  2s │
-│  EnvProvider        beta     Briefed  ●●●○  local gone  1/1  -      -  2s │
-│  ChangeRequest                                                            │
-│  Conversation                                                             │
-│  Listener                                                                 │
-│ Task/alpha                                                                │
-│ j/k move · tab kind · R refresh · esc close                               │
-╰───────────────────────────────────────────────────────────────────────────╯
-```
+![Fleet Lens in thurbox's Doom theme: F2 opens it on four Tasks, the one that needs attention on top; j moves down the rows, tab steps through the kinds to the ChangeRequest a shipped Task declared, esc closes it](media/demo.gif)
+
+The recording is a released thurbox (v2.76.2) and fleet (v2.3.0) with a
+throwaway HOME and a scratch Fleet store on the fake runtime, so no agent runs
+and nothing real is read. Reproduce it with `demo/record.sh`.
 
 It reads Fleet only through `fleet … --json`, and writes nothing to Fleet.
 
@@ -95,10 +86,20 @@ In Settings, under `fleetlens`:
 selene . && stylua --check .     # lint, against thurbox's plugin sandbox (thurbox.yml)
 tests/run.sh                     # the pure modules, Lua 5.4
 tests/e2e/lens_lists_tasks.sh    # real thurbox + real fleet in tmux, sandboxed HOME
+demo/record.sh                   # re-record media/demo.gif
 ```
 
 The end-to-end test needs `tmux`, `python3`, `thurbox`, `thurbox-cli` and
 `fleet`. CI pins their versions in `.github/workflows/ci.yml`.
+
+`demo/record.sh` builds the same kind of sandbox, seeds four Tasks (one whose
+session vanished, so it needs attention; one shipped with a declared
+ChangeRequest; one stuck; one waiting), and records the pane with asciinema,
+driven by tmux because VHS cannot press F2, then renders it with agg. It also
+needs `asciinema` and `agg`, takes `THURBOX_BIN` / `FLEET_BIN` like the e2e,
+and refuses to render a cast that contains the machine's user name, host name
+or paths. The store's path shows in a "could not tell" banner, so the take
+leaves that state out; the e2e covers it.
 
 ## License
 
