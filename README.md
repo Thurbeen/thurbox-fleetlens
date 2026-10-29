@@ -15,12 +15,12 @@ It reads Fleet only through `fleet … --json`, and writes nothing to Fleet.
 ## Install
 
 ```sh
-thurbox-cli plugin install git+https://github.com/Thurbeen/thurbox-fleet
+thurbox-cli plugin install git+https://github.com/Thurbeen/thurbox-fleetlens
 thurbox-cli plugin check
 ```
 
 Then trust it, because it runs `fleet`: Settings (`Ctrl+,`) → `]` → select
-`thurbox-fleet/plugins/88_fleet_lens.lua` → `t`. Until then, F2 opens the
+`thurbox-fleetlens/plugins/88_fleet_lens.lua` → `t`. Until then, F2 opens the
 pane and it tells you this.
 
 `thurbox-cli plugin update` fetches a newer version. A changed file of an

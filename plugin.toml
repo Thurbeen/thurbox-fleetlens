@@ -3,10 +3,10 @@
 # Several files — the pane and the modules it requires — so it is installed by
 # CLONING it:
 #
-#     thurbox-cli plugin install git+https://github.com/Thurbeen/thurbox-fleet
+#     thurbox-cli plugin install git+https://github.com/Thurbeen/thurbox-fleetlens
 #
-# The clone lands at `<interface dir>/thurbox-fleet/`, which is the name the
-# pane requires its modules by (`require("thurbox-fleet.lib.source")`). It is a
+# The clone lands at `<interface dir>/thurbox-fleetlens/`, which is the name the
+# pane requires its modules by (`require("thurbox-fleetlens.lib.source")`). It is a
 # float, so it needs no layout slot.
 #
 # One capability is asked for: `run`, to execute `fleet … --json`. Until you

@@ -1,8 +1,8 @@
 -- The pure modules under a real Lua: every row of the error-state table, and
 -- the rows the model builds. Run through tests/run.sh.
 
-local source = require("thurbox-fleet.lib.source")
-local model = require("thurbox-fleet.lib.model")
+local source = require("thurbox-fleetlens.lib.source")
+local model = require("thurbox-fleetlens.lib.model")
 
 local failures, count = 0, 0
 local function test(name, fn)

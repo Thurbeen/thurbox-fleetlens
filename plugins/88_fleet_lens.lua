@@ -12,9 +12,9 @@
 -- rows on screen, drawn stale, under a banner saying why. Only an exit-0 `[]`
 -- draws "No Tasks".
 
-local source = require("thurbox-fleet.lib.source")
-local model = require("thurbox-fleet.lib.model")
-local view = require("thurbox-fleet.lib.view")
+local source = require("thurbox-fleetlens.lib.source")
+local model = require("thurbox-fleetlens.lib.model")
+local view = require("thurbox-fleetlens.lib.view")
 local settings = require("lib.settings")
 
 local NAME = "fleetlens"

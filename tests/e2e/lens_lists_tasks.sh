@@ -39,10 +39,10 @@ command -v tmux >/dev/null || die "tmux not found"
 command -v python3 >/dev/null || die "python3 not found"
 
 # ── the sandbox ─────────────────────────────────────────────────────────────
-ROOT="$(mktemp -d "${TMPDIR:-/tmp}/thurbox-fleet-e2e.XXXXXX")"
+ROOT="$(mktemp -d "${TMPDIR:-/tmp}/thurbox-fleetlens-e2e.XXXXXX")"
 export HOME="$ROOT/home" XDG_CONFIG_HOME="$ROOT/config" XDG_DATA_HOME="$ROOT/data"
 export XDG_STATE_HOME="$ROOT/state" XDG_CACHE_HOME="$ROOT/cache"
-export TMUX_TMPDIR="$ROOT/tmux" THURBOX_SOCKET="thurbox-fleet-e2e"
+export TMUX_TMPDIR="$ROOT/tmux" THURBOX_SOCKET="thurbox-fleetlens-e2e"
 unset THURBOX_CONFIG_DIR THURBOX_DATA_DIR THURBOX_UI_DIR FLEET_CONFIG TMUX
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$TMUX_TMPDIR"
 SOCKET="lens-e2e"
@@ -111,18 +111,18 @@ case "$UI_DIR" in "$ROOT"/*) ;; *) die "interface '$UI_DIR' is outside the sandb
 rm -f "$UI_DIR"/plugins/*_seed.lua
 [ -d "$UI_DIR/plugins" ] || die "no interface at '$UI_DIR'"
 CONFIG="$(dirname "$UI_DIR")"
-ln -sfn "$HERE" "$UI_DIR/thurbox-fleet"
+ln -sfn "$HERE" "$UI_DIR/thurbox-fleetlens"
 cat >>"$UI_DIR/plugins.toml" <<TOML
 
 [[plugin]]
 src  = "git+file://$HERE"
-file = "thurbox-fleet/plugins/88_fleet_lens.lua"
+file = "thurbox-fleetlens/plugins/88_fleet_lens.lua"
 TOML
 
 # `run` is absent until the file is trusted. There is no `plugin trust`, so this
 # writes the record the Interface tab's `t` writes: the absolute path against an
 # FNV-1a digest of the file (`kernel::bundled::digest`).
-PANE="$UI_DIR/thurbox-fleet/plugins/88_fleet_lens.lua"
+PANE="$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua"
 if [ -f "$PANE" ]; then
   python3 - "$PANE" "$CONFIG/ui.json" <<'PY'
 import json, pathlib, sys

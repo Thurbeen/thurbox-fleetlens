@@ -11,7 +11,7 @@
 -- An error never carries rows. The caller keeps the last ok answer and draws it
 -- stale, which is how "unreadable" stays distinct from "empty".
 
-local json = require("thurbox-fleet.lib.json")
+local json = require("thurbox-fleetlens.lib.json")
 
 local M = {}
 

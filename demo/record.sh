@@ -99,15 +99,15 @@ case "$UI_DIR" in "$ROOT"/*) ;; *) echo "interface '$UI_DIR' is outside the sand
 "$THURBOX_CLI" plugin new seed >/dev/null
 rm -f "$UI_DIR"/plugins/*_seed.lua
 CONFIG="$(dirname "$UI_DIR")"
-ln -sfn "$REPO" "$UI_DIR/thurbox-fleet"
+ln -sfn "$REPO" "$UI_DIR/thurbox-fleetlens"
 cat >>"$UI_DIR/plugins.toml" <<TOML
 
 [[plugin]]
 src  = "git+file://$REPO"
-file = "thurbox-fleet/plugins/88_fleet_lens.lua"
+file = "thurbox-fleetlens/plugins/88_fleet_lens.lua"
 TOML
 # Trust the pane the way the Interface tab's `t` does (see the e2e).
-python3 - "$UI_DIR/thurbox-fleet/plugins/88_fleet_lens.lua" "$CONFIG/ui.json" <<'PY'
+python3 - "$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua" "$CONFIG/ui.json" <<'PY'
 import json, pathlib, sys
 pane, out = sys.argv[1], pathlib.Path(sys.argv[2])
 h = 0xCBF29CE484222325
