@@ -9,7 +9,8 @@
 --   columns = { "NAME", ... }, rows = { model rows }, selected = 1,
 --   loading = bool, stale = bool, banner = { title, detail } | nil,
 --   note = "untrusted text" | nil,
---   detail = { title = "Task/alpha", lines = { string... }, offset = 0 } | nil,
+--   detail = { title = "Task/alpha", lines = { { text, first }... }, offset = 0 } | nil,
+--     (`lines` as `yaml.wrap` breaks them, at `M.text_width`)
 -- }
 --
 -- Clicks land by id: `kind:<Kind>` on a rail line, `row:<name>` on a table row.
@@ -150,6 +151,14 @@ function M.room(ctx)
   return math.max(1, M.height(ctx) - 1)
 end
 
+--- How many columns a resource's line may take: the float's 92 % of the
+--- screen, less its two borders, the leading space and one spare column.
+---@param ctx table
+---@return integer
+function M.text_width(ctx)
+  return math.max(20, math.floor((ctx.width or 100) * 0.92) - 4)
+end
+
 ---@param ctx table
 ---@return integer
 function M.height(ctx)
@@ -171,14 +180,15 @@ local function detail_body(snap, height)
     }),
   }
   for i = offset + 1, last do
-    local key, rest = d.lines[i]:match("^(%s*[^%s:][^:]*:)(.*)$")
-    if key and not d.lines[i]:find('^%s*["|]') then
+    local text = d.lines[i].text
+    local key, rest = text:match("^(%s*[^%s:][^:]*:)(.*)$")
+    if d.lines[i].first and key and not text:find('^%s*["|]') then
       children[#children + 1] = line({
         { text = " " .. key, style = { fg = theme.accent } },
         { text = rest, style = { fg = theme.text } },
       })
     else
-      children[#children + 1] = line({ { text = " " .. d.lines[i], style = { fg = theme.text } } })
+      children[#children + 1] = line({ { text = " " .. text, style = { fg = theme.text } } })
     end
   end
   return { type = "box", fill = 1, children = children }

@@ -160,7 +160,7 @@ local function render(ctx)
     for i, row in ipairs(rows) do
       if row.name == detail.name then
         selected = i
-        local lines = yaml.lines(row.object)
+        local lines = yaml.wrap(yaml.lines(row.object), view.text_width(ctx))
         detail_max = math.max(0, #lines - view.room(ctx))
         detail.offset = math.min(detail.offset, detail_max)
         shown = { title = kind .. "/" .. row.name, lines = lines, offset = detail.offset }

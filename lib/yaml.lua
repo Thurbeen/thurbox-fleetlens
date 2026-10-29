@@ -138,6 +138,68 @@ emit = function(t, indent, out)
   end
 end
 
+--- Lines as rows `width` wide: a line that does not fit breaks at a space,
+--- or mid-word when one word is wider than the room, and continues under
+--- where its value starts (after `key: ` or `- `). A hang that would leave
+--- less than half the width falls back to the line's indent plus two.
+--- Each row is { text, first }, `first` on the row a line starts on.
+---@param lines string[]
+---@param width integer
+---@return table[]
+function M.wrap(lines, width)
+  local out = {}
+  for _, l in ipairs(lines) do
+    local chars = {}
+    for c in l:gmatch(utf8.charpattern) do
+      chars[#chars + 1] = c
+    end
+    if #chars <= width then
+      out[#out + 1] = { text = l, first = true }
+    else
+      local indent = #l:match("^%s*")
+      local hang = #l:match("^[%s%-]*")
+      local key = l:match('^[^%s:"]+: ', hang + 1)
+      hang = hang + (key and #key or 0)
+      -- No break inside the key, even when the hang falls back.
+      local value_at = hang
+      if width - hang < math.floor(width / 2) then
+        hang = math.min(indent + 2, width - 1)
+      end
+      local pad = string.rep(" ", hang)
+      local at, first = 1, true
+      while at <= #chars do
+        local room = first and width or width - hang
+        local floor = first and value_at or 0
+        local stop = at + room - 1
+        if stop >= #chars then
+          stop = #chars
+        else
+          -- The last space that still fits, or a space right at the edge.
+          local cut = nil
+          for i = math.min(stop + 1, #chars), at + floor, -1 do
+            if chars[i] == " " then
+              cut = i
+              break
+            end
+          end
+          if cut then
+            stop = cut - 1
+          end
+        end
+        out[#out + 1] = {
+          text = (first and "" or pad) .. table.concat(chars, "", at, stop),
+          first = first,
+        }
+        at, first = stop + 1, false
+        while chars[at] == " " do
+          at = at + 1
+        end
+      end
+    end
+  end
+  return out
+end
+
 --- The lines of `value`, no trailing newline on any.
 ---@param value any
 ---@return string[]

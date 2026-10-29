@@ -124,7 +124,7 @@ dir = "fake-host"
 TOML
 cat >"$FLEET_DIR/tasks.json" <<JSON
 [{"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"alpha"},
-  "spec":{"harness":"sh","host":"local","brief":"Wait.","workspace":{"dir":"$FLEET_DIR/work/alpha"},"dispatch":false}},
+  "spec":{"harness":"sh","host":"local","brief":"Wait for the release branch to be cut, then check every service in the monorepo still builds against it, list the ones that do not, and open one issue per failing service with the build log attached so the owners can pick them up tomorrow morning before standup end-of-brief.","workspace":{"dir":"$FLEET_DIR/work/alpha"},"dispatch":false}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"beta"},
   "spec":{"harness":"sh","host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
 JSON
@@ -253,6 +253,15 @@ send Home
 wait_for '│ +apiVersion: ' "Home did not scroll back to the top"
 send Escape
 wait_for 'NAME +PHASE' "Esc did not leave the double-clicked YAML"
+
+log "a line wider than the Lens wraps instead of being cut"
+click 'alpha +Pending' 2
+wait_for '│ +brief: Wait for the release branch' "alpha's YAML has no brief"
+wait_for 'end-of-brief\. *│' "the end of a long brief was cut, not wrapped onto another line"
+# The continuation hangs under the value, not at the left edge.
+row '│ {9,}[a-z]' "a wrapped line does not hang under its value"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave alpha's YAML"
 
 log "an unreadable record is Unknown, not empty"
 cp "$FLEET_DIR/data/objects/Task/beta.json" "$ROOT/beta.json.bak"

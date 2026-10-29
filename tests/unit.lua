@@ -283,5 +283,38 @@ test("yaml: a list of lists and of scalars", function()
   eq(yaml_of({ m = { { 1, 2 }, "x" } }), "m:\n  - - 1\n    - 2\n  - x")
 end)
 
+-- ── yaml.wrap ───────────────────────────────────────────────────────────────
+
+local function wrapped(lines, width)
+  local out = {}
+  for _, l in ipairs(yaml.wrap(lines, width)) do
+    out[#out + 1] = (l.first and "" or "~") .. l.text
+  end
+  return table.concat(out, "\n")
+end
+
+test("wrap: a short line is left alone", function()
+  eq(wrapped({ "kind: Task" }, 20), "kind: Task")
+end)
+
+test("wrap: a long value breaks at spaces and hangs under itself", function()
+  eq(
+    wrapped({ "  brief: one two three four five six" }, 20),
+    "  brief: one two\n~         three four\n~         five six"
+  )
+end)
+
+test("wrap: a list item hangs after its dash", function()
+  eq(wrapped({ "  - aaa bbb ccc ddd" }, 12), "  - aaa bbb\n~    ccc ddd")
+end)
+
+test("wrap: a word wider than the room is cut, never lost", function()
+  eq(wrapped({ "k: abcdefghijkl" }, 8), "k: abcde\n~   fghij\n~   kl")
+end)
+
+test("wrap: too deep a hang falls back to the line's own indent", function()
+  eq(wrapped({ "  some_long_key: a b c d" }, 20), "  some_long_key: a b\n~    c d")
+end)
+
 print(string.format("%d/%d passed", count - failures, count))
 os.exit(failures == 0 and 0 or 1)

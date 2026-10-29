@@ -44,7 +44,8 @@ to read it, click a hint in the footer to do what it says, and click outside
 the Lens to close it.
 
 A resource is the object fleet returned for the list, as YAML: the envelope
-first, then every field by name. It is read-only and follows each refresh.
+first, then every field by name. A line wider than the Lens wraps, and goes
+on under where its value starts. It is read-only and follows each refresh.
 
 Rows that need a person (a Task whose `NeedsAttention` is True) come first,
 marked `!`. The line under the table gives the reason and message.
