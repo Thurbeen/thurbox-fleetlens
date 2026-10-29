@@ -1,0 +1,22 @@
+# Run with prek: `prek install`, then hooks run on commit.
+repos:
+  - repo: local
+    hooks:
+      - id: stylua
+        name: stylua
+        entry: stylua --check .
+        language: system
+        pass_filenames: false
+        files: \.lua$
+      - id: selene
+        name: selene
+        entry: selene .
+        language: system
+        pass_filenames: false
+        files: \.lua$
+      - id: unit
+        name: unit tests
+        entry: tests/run.sh
+        language: system
+        pass_filenames: false
+        files: \.lua$

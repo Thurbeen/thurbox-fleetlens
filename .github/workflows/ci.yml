@@ -1,0 +1,73 @@
+# What CI proves: the Lua is sound and stays inside the plugin sandbox, the pure
+# modules behave, and the pane works end to end against a real thurbox and a
+# real fleet.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# The releases the pane is tested against. The vendored thurbox.yml must match
+# THURBOX_TAG; the e2e downloads both binaries.
+env:
+  THURBOX_TAG: v2.76.2
+  FLEET_TAG: v2.3.0
+
+jobs:
+  lint:
+    name: Lua
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Thurbeen/thurbox
+          ref: ${{ env.THURBOX_TAG }}
+          path: .thurbox
+          sparse-checkout: thurbox.yml
+          sparse-checkout-cone-mode: false
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: selene,stylua
+      - name: The sandbox contract matches the pinned tag
+        run: diff -u .thurbox/thurbox.yml thurbox.yml
+      - run: selene .
+      - run: stylua --check .
+
+  test:
+    name: Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Lua 5.4
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq lua5.4
+      - run: tests/run.sh
+
+  e2e:
+    name: End to end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install tmux
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq tmux
+      - name: Fetch thurbox and fleet
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP/bin"
+          curl -sSfL "https://github.com/Thurbeen/thurbox/releases/download/${THURBOX_TAG}/thurbox-${THURBOX_TAG}-x86_64-unknown-linux-musl.tar.gz" | tar xz thurbox thurbox-cli
+          curl -sSfL -o fleet.tar.gz "https://github.com/Thurbeen/fleet/releases/download/${FLEET_TAG}/fleet-${FLEET_TAG}-x86_64-unknown-linux-musl.tar.gz"
+          curl -sSfL -o sums.txt "https://github.com/Thurbeen/fleet/releases/download/${FLEET_TAG}/fleet-${FLEET_TAG}-checksums.txt"
+          grep "fleet-${FLEET_TAG}-x86_64-unknown-linux-musl.tar.gz" sums.txt | sed 's|  .*|  fleet.tar.gz|' | sha256sum -c -
+          tar xzf fleet.tar.gz fleet
+          ./fleet --version
+          ./thurbox-cli version --json
+      - name: Lens lists Tasks; Unknown is not empty
+        run: THURBOX_BIN="$RUNNER_TEMP/bin" FLEET_BIN="$RUNNER_TEMP/bin" tests/e2e/lens_lists_tasks.sh

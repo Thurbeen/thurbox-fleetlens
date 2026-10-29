@@ -1,0 +1,32 @@
+# How this repository declares its gate to the publish skill.
+version: 1
+
+forge: github
+base: main
+
+review:
+  rules:
+    - AGENTS.md
+    - README.md
+
+gate:
+  - name: lint
+    run:
+      - selene .
+      - stylua --check .
+    fix: stylua .
+  - name: unit
+    run:
+      - tests/run.sh
+  - name: e2e
+    run:
+      - tests/e2e/lens_lists_tasks.sh
+    instructions: >-
+      Needs tmux, python3, and `thurbox`, `thurbox-cli` and `fleet` on PATH
+      (or THURBOX_BIN / FLEET_BIN naming their directories) at the versions CI
+      pins in .github/workflows/ci.yml. It runs under a throwaway HOME and
+      refuses an interface outside it.
+
+ci:
+  required: true
+  timeout: 15m
