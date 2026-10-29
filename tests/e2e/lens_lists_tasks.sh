@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Acceptance: Fleet Lens lists Tasks from a real Fleet store, and an unreadable
-# store is never drawn as an empty list.
+# Acceptance: Fleet Lens lists Tasks from a real Fleet store, the mouse drives
+# it, and an unreadable store is never drawn as an empty list.
 #
 # A real `fleet` (fake runtime, so no agent runs) and a real `thurbox` in a
 # private tmux server, both under a throwaway HOME, so nothing real is read or
@@ -110,7 +110,7 @@ for y, line in enumerate(sys.stdin.read().split("\n"), start=1):
   tmux -L "$SOCKET" send-keys -t lens -l $'\e'"[<$2;$x;${y}M"
 }
 
-# ── a Fleet store with two Tasks in two phases ──────────────────────────────
+# ── a Fleet store with two Tasks in two phases, one using a TaskConfig ──────
 log "seeding a fake-runtime Fleet store"
 FLEET_DIR="$ROOT/fleet"
 mkdir -p "$FLEET_DIR/work/alpha" "$FLEET_DIR/work/beta"
@@ -123,8 +123,10 @@ kind = "fake"
 dir = "fake-host"
 TOML
 cat >"$FLEET_DIR/tasks.json" <<JSON
-[{"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"alpha"},
-  "spec":{"harness":"sh","host":"local","brief":"Wait for the release branch to be cut, then check every service in the monorepo still builds against it, list the ones that do not, and open one issue per failing service with the build log attached so the owners can pick them up tomorrow morning before standup end-of-brief.","workspace":{"dir":"$FLEET_DIR/work/alpha"},"dispatch":false}},
+[{"apiVersion":"fleet/v1alpha1","kind":"TaskConfig","metadata":{"name":"defaults"},
+  "spec":{"harness":"sh"}},
+ {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"alpha"},
+  "spec":{"harness":"sh","configRef":{"name":"defaults"},"host":"local","brief":"Wait for the release branch to be cut, then check every service in the monorepo still builds against it, list the ones that do not, and open one issue per failing service with the build log attached so the owners can pick them up tomorrow morning before standup end-of-brief.","workspace":{"dir":"$FLEET_DIR/work/alpha"},"dispatch":false}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"beta"},
   "spec":{"harness":"sh","host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
 JSON
@@ -204,9 +206,9 @@ wait_for "^│ *│ Task/$other " "j did not move the selection from $first to $
 send k
 wait_for "^│ *│ Task/$first " "k did not move the selection back to $first"
 
-log "tab steps to the next kind; an empty kind says so"
+log "tab steps to the next kind"
 send Tab
-wait_for 'No TaskConfigs' "tab did not show the empty TaskConfig list"
+wait_for 'defaults +' "tab did not show the TaskConfig list"
 for _ in 1 2 3 4 5; do send Tab; done
 wait_for 'alpha +Pending' "tab did not wrap back to Task"
 
@@ -221,7 +223,7 @@ wait_for 'alpha +Pending' "tab did not come back to Task"
 
 log "the mouse: a kind, a row, the wheel, a footer hint"
 click 'TaskConfig'
-wait_for 'No TaskConfigs' "a click on TaskConfig did not select it"
+wait_for 'defaults +' "a click on TaskConfig did not select it"
 click 'Task +[0-9]'
 wait_for 'alpha +Pending' "a click on Task did not select it"
 click "$other +[A-Z]"
@@ -231,7 +233,7 @@ wheel "$other +[A-Z]" 65
 wheel "$other +[A-Z]" 64
 wait_for "^│ *│ Task/$first " "the wheel did not move the selection to $first"
 click 'tab kind'
-wait_for 'No TaskConfigs' "a click on the 'tab kind' hint did not step the kind"
+wait_for 'defaults +' "a click on the 'tab kind' hint did not step the kind"
 send BTab
 wait_for 'alpha +Pending' "shift+tab did not come back to Task"
 
@@ -253,6 +255,34 @@ send Home
 wait_for '│ +apiVersion: ' "Home did not scroll back to the top"
 send Escape
 wait_for 'NAME +PHASE' "Esc did not leave the double-clicked YAML"
+
+log "the wheel scrolls a resource"
+click 'beta +Briefed' 2
+wait_for '│ +name: beta\b' "a double-click on beta did not show its YAML"
+wheel '│ +kind: Task' 65
+wait_gone '│ +apiVersion: ' "the wheel did not scroll the YAML down"
+wheel '│ +kind: Task' 64
+wait_for '│ +apiVersion: ' "the wheel did not scroll the YAML back up"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave beta's YAML"
+
+log "a relation is a link: a click goes to the resource it names"
+click 'alpha +Pending'
+wait_for '^│ *│ Task/alpha .*TaskConfig/defaults' "alpha's trail does not link its TaskConfig"
+click 'TaskConfig/defaults'
+wait_for '▸ TaskConfig' "a click on alpha's TaskConfig link did not go to TaskConfig"
+wait_for '^│ *│ TaskConfig/defaults ' "the linked TaskConfig 'defaults' is not selected"
+send BTab
+wait_for 'alpha +Pending' "shift+tab did not come back to Task"
+click 'alpha +Pending' 2
+wait_for '│ +name: alpha\b' "a double-click on alpha did not show its YAML"
+click 'TaskConfig/defaults'
+wait_for '│ +kind: TaskConfig' "a link clicked in alpha's YAML did not show the TaskConfig"
+row '│ +name: defaults\b' "the YAML a link showed is not 'defaults'"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave the linked YAML"
+send BTab
+wait_for 'alpha +Pending' "shift+tab did not come back to Task"
 
 log "a line wider than the Lens wraps instead of being cut"
 click 'alpha +Pending' 2
@@ -277,6 +307,38 @@ cp "$ROOT/beta.json.bak" "$FLEET_DIR/data/objects/Task/beta.json"
 send R
 wait_gone 'Store unreadable' "the banner stayed after the store was readable"
 row 'alpha +Pending' "row 'alpha' is gone after recovery"
+
+log "a Task needing attention still links what it names"
+LONG=release-branch-build-check-defaults-for-every-service-in-the-monorepo-x
+cat >"$FLEET_DIR/gamma.json" <<JSON
+[{"apiVersion":"fleet/v1alpha1","kind":"TaskConfig","metadata":{"name":"$LONG"},
+  "spec":{"harness":"sh"}},
+ {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"gamma"},
+  "spec":{"harness":"sh","configRef":{"name":"$LONG"},"host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
+JSON
+fleet_ apply -f "$FLEET_DIR/gamma.json" >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+# gamma's session vanishes before it answers: fleet raises NeedsAttention.
+python3 - "$FLEET_DIR/fake-host/state.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+state = json.load(open(path))
+for key, session in state["sessions"].items():
+    if key.startswith("gamma."):
+        session["gone"] = True
+json.dump(state, open(path, "w"))
+PY
+fleet_ reconcile --max-passes 10 >/dev/null
+send R
+wait_for '! gamma +' "gamma is not drawn as needing attention"
+click 'gamma +'
+wait_for '^│ *│ ! NeedsAttention/' "gamma's trail does not say why it needs attention"
+# The reason and the link are wider than the Lens: the reason gives way.
+wait_for "TaskConfig/$LONG *│" "a long reason pushed gamma's TaskConfig link off the Lens"
+click "TaskConfig/$LONG"
+wait_for "^│ *│ TaskConfig/$LONG " "a click on gamma's TaskConfig link did not go to it"
+send BTab
+wait_for 'alpha +Pending' "shift+tab did not come back to Task"
 
 log "Esc closes it"
 send Escape

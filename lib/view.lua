@@ -13,8 +13,9 @@
 --     (`lines` as `yaml.wrap` breaks them, at `M.text_width`)
 -- }
 --
--- Clicks land by id: `kind:<Kind>` on a rail line, `row:<name>` on a table row.
--- A footer hint carries `key:<chord>`, so the kernel replays the key itself.
+-- Clicks land by id: `kind:<Kind>` on a rail line, `row:<name>` on a table row,
+-- `rel:<Kind>/<name>` on a relation in the trail. A footer hint carries
+-- `key:<chord>`, so the kernel replays the key itself.
 
 local theme = require("lib.theme")
 local hover = require("lib.hover")
@@ -232,11 +233,31 @@ local DETAIL_HINTS = {
 function M.render(ctx, snap)
   local height = M.height(ctx)
   local sel = snap.rows[snap.selected]
+  -- The relations are links; the text before them gives way so they stay on
+  -- screen to be clicked.
+  local links, room = {}, M.text_width(ctx)
+  for i, r in ipairs(sel and sel.related or {}) do
+    local gap = i == 1 and "  → " or "  "
+    local ref = r.kind .. "/" .. r.name
+    local id = "rel:" .. ref
+    links[#links + 1] = { text = gap, style = { fg = theme.muted } }
+    links[#links + 1] = {
+      text = ref,
+      id = id,
+      style = hover.id(id) and hover.button_style() or { fg = theme.accent, underline = true },
+    }
+    room = room - widgets.len(gap) - widgets.len(ref)
+  end
   local trail = { { text = " ", style = { fg = theme.muted } } }
   if sel and sel.why then
-    trail = { { text = " ! " .. sel.why, style = { fg = theme.bad } } }
+    local why = widgets.truncate_hard("! " .. sel.why, room)
+    trail = { { text = " " .. why, style = { fg = theme.bad } } }
   elseif sel then
-    trail = { { text = " " .. snap.kind .. "/" .. (sel.name or ""), style = { fg = theme.muted } } }
+    local name = widgets.truncate_hard(snap.kind .. "/" .. (sel.name or ""), room)
+    trail = { { text = " " .. name, style = { fg = theme.muted } } }
+  end
+  for _, span in ipairs(links) do
+    trail[#trail + 1] = span
   end
   local body = {
     line({

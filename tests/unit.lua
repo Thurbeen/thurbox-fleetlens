@@ -217,6 +217,44 @@ test("a row keeps the object it was built from", function()
   eq(model.rows("Task", { obj }, 0, {})[1].object, obj)
 end)
 
+-- ── model.relations ─────────────────────────────────────────────────────────
+
+local function related(kind, obj)
+  local out = {}
+  for _, r in ipairs(model.relations(kind, obj)) do
+    out[#out + 1] = r.kind .. "/" .. r.name
+  end
+  return table.concat(out, ",")
+end
+
+test("relations: a Task's config, then what it declared", function()
+  eq(
+    related("Task", {
+      spec = { configRef = { name = "defaults" } },
+      status = {
+        declared = {
+          { kind = "ChangeRequest", name = "cr-1", url = "https://example.test/pull/1" },
+          { kind = "ChangeRequest", name = "cr-2" },
+        },
+      },
+    }),
+    "TaskConfig/defaults,ChangeRequest/cr-1,ChangeRequest/cr-2"
+  )
+end)
+
+test("relations: a TaskConfig's env providers", function()
+  eq(
+    related("TaskConfig", { spec = { envFrom = { { name = "gh" }, { name = "aws" } } } }),
+    "EnvProvider/gh,EnvProvider/aws"
+  )
+end)
+
+test("relations: none, and malformed references are skipped", function()
+  eq(related("Task", { metadata = { name = "a" } }), "")
+  eq(related("Task", { spec = { configRef = {} }, status = { declared = { { kind = 1 } } } }), "")
+  eq(related("ChangeRequest", { spec = { url = "x" } }), "")
+end)
+
 -- ── yaml.lines ──────────────────────────────────────────────────────────────
 
 local function yaml_of(value)
