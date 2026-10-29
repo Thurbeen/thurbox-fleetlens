@@ -233,21 +233,31 @@ local DETAIL_HINTS = {
 function M.render(ctx, snap)
   local height = M.height(ctx)
   local sel = snap.rows[snap.selected]
-  local trail = { { text = " ", style = { fg = theme.muted } } }
-  if sel and sel.why then
-    trail = { { text = " ! " .. sel.why, style = { fg = theme.bad } } }
-  elseif sel then
-    trail = { { text = " " .. snap.kind .. "/" .. (sel.name or ""), style = { fg = theme.muted } } }
-  end
+  -- The relations are links; the text before them gives way so they stay on
+  -- screen to be clicked.
+  local links, room = {}, M.text_width(ctx)
   for i, r in ipairs(sel and sel.related or {}) do
-    trail[#trail + 1] = { text = i == 1 and "  → " or "  ", style = { fg = theme.muted } }
+    local gap = i == 1 and "  → " or "  "
     local ref = r.kind .. "/" .. r.name
     local id = "rel:" .. ref
-    trail[#trail + 1] = {
+    links[#links + 1] = { text = gap, style = { fg = theme.muted } }
+    links[#links + 1] = {
       text = ref,
       id = id,
       style = hover.id(id) and hover.button_style() or { fg = theme.accent, underline = true },
     }
+    room = room - widgets.len(gap) - widgets.len(ref)
+  end
+  local trail = { { text = " ", style = { fg = theme.muted } } }
+  if sel and sel.why then
+    local why = widgets.truncate_hard("! " .. sel.why, room)
+    trail = { { text = " " .. why, style = { fg = theme.bad } } }
+  elseif sel then
+    local name = widgets.truncate_hard(snap.kind .. "/" .. (sel.name or ""), room)
+    trail = { { text = " " .. name, style = { fg = theme.muted } } }
+  end
+  for _, span in ipairs(links) do
+    trail[#trail + 1] = span
   end
   local body = {
     line({

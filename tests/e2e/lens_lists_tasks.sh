@@ -308,6 +308,38 @@ send R
 wait_gone 'Store unreadable' "the banner stayed after the store was readable"
 row 'alpha +Pending' "row 'alpha' is gone after recovery"
 
+log "a Task needing attention still links what it names"
+LONG=release-branch-build-check-defaults-for-every-service-in-the-monorepo-x
+cat >"$FLEET_DIR/gamma.json" <<JSON
+[{"apiVersion":"fleet/v1alpha1","kind":"TaskConfig","metadata":{"name":"$LONG"},
+  "spec":{"harness":"sh"}},
+ {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"gamma"},
+  "spec":{"harness":"sh","configRef":{"name":"$LONG"},"host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
+JSON
+fleet_ apply -f "$FLEET_DIR/gamma.json" >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+# gamma's session vanishes before it answers: fleet raises NeedsAttention.
+python3 - "$FLEET_DIR/fake-host/state.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+state = json.load(open(path))
+for key, session in state["sessions"].items():
+    if key.startswith("gamma."):
+        session["gone"] = True
+json.dump(state, open(path, "w"))
+PY
+fleet_ reconcile --max-passes 10 >/dev/null
+send R
+wait_for '! gamma +' "gamma is not drawn as needing attention"
+click 'gamma +'
+wait_for '^│ *│ ! NeedsAttention/' "gamma's trail does not say why it needs attention"
+# The reason and the link are wider than the Lens: the reason gives way.
+wait_for "TaskConfig/$LONG *│" "a long reason pushed gamma's TaskConfig link off the Lens"
+click "TaskConfig/$LONG"
+wait_for "^│ *│ TaskConfig/$LONG " "a click on gamma's TaskConfig link did not go to it"
+send BTab
+wait_for 'alpha +Pending' "shift+tab did not come back to Task"
+
 log "Esc closes it"
 send Escape
 wait_gone 'Fleet Lens' "Esc did not close the Lens"
