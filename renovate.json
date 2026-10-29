@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "minimumReleaseAge": "7 days",
+  "internalChecksFilter": "strict",
+  "osvVulnerabilityAlerts": true,
+  "packageRules": [
+    {
+      "description": "Actions stay pinned by full SHA, with the version in a trailing comment.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "description": "PR titles become squash commits on main, so they are conventional.",
+      "matchPackageNames": ["*"],
+      "semanticCommits": "enabled"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "The thurbox release CI tests against. thurbox.yml is vendored from the same tag, so CI fails until it is refreshed.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": ["THURBOX_TAG: (?<currentValue>v[^\\s]+)"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "Thurbeen/thurbox"
+    },
+    {
+      "description": "The fleet release CI tests against.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": ["FLEET_TAG: (?<currentValue>v[^\\s]+)"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "Thurbeen/fleet"
+    }
+  ]
+}

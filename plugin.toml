@@ -1,0 +1,18 @@
+# Fleet Lens: every Fleet v2 resource kind, browsed from one thurbox float.
+#
+# Several files — the pane and the modules it requires — so it is installed by
+# CLONING it:
+#
+#     thurbox-cli plugin install git+https://github.com/Thurbeen/thurbox-fleet
+#
+# The clone lands at `<interface dir>/thurbox-fleet/`, which is the name the
+# pane requires its modules by (`require("thurbox-fleet.lib.source")`). It is a
+# float, so it needs no layout slot.
+#
+# One capability is asked for: `run`, to execute `fleet … --json`. Until you
+# trust the pane, F2 opens it and it says so.
+name = "fleet-lens"
+description = "Browse Fleet v2 resources — Tasks first — in a keyboard-first float"
+version = "v0.1.0"
+requires_thurbox = ">=2.76.2"
+pane = { source = "plugins/88_fleet_lens.lua", path = "plugins/88_fleet_lens.lua" }
