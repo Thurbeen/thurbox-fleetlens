@@ -4,7 +4,7 @@ A [thurbox](https://github.com/Thurbeen/thurbox) pane that browses
 [Fleet](https://github.com/Thurbeen/fleet) v2 resources: every kind Fleet
 serves, Tasks first, in one keyboard-first float.
 
-![Fleet Lens in thurbox's Doom theme: F2 opens it on four Tasks, the one that needs attention on top; j moves down the rows, tab steps through the kinds to the ChangeRequest a shipped Task declared, esc closes it](media/demo.gif)
+![Fleet Lens in thurbox's Doom theme: F2 opens it on four Tasks, the one that needs attention on top; j and k move; enter reads the shipped Task as YAML and j and G scroll it; tab steps through the kinds to the ChangeRequest it declared and shift+tab steps back; esc closes it](media/demo.gif)
 
 The recording is a released thurbox (v2.76.2) and fleet (v2.3.0) with a
 throwaway HOME and a scratch Fleet store on the fake runtime, so no agent runs
@@ -32,10 +32,19 @@ commands.
 | Key | Does |
 | --- | --- |
 | `F2` | Open or close the Lens (also in the palette as "Fleet: open Lens") |
-| `j` / `k`, `↓` / `↑` | Move |
-| `tab` | Next kind |
+| `j` / `k`, `↓` / `↑`, the wheel | Move, or scroll a resource |
+| `PgDn` / `PgUp`, `g` / `G`, `Home` / `End` | Ten rows, or to the first / last |
+| `tab` / `shift+tab`, `Ctrl+L` / `Ctrl+H` | Next / previous kind |
+| `enter` | Read the selected resource as YAML |
 | `R` | Ask fleet again now |
-| `esc`, `q` | Close |
+| `esc`, `q` | Back from a resource; close |
+
+The mouse works too: click a kind or a row to select it, double-click a row
+to read it, click a hint in the footer to do what it says, and click outside
+the Lens to close it.
+
+A resource is the object fleet returned for the list, as YAML: the envelope
+first, then every field by name. It is read-only and follows each refresh.
 
 Rows that need a person (a Task whose `NeedsAttention` is True) come first,
 marked `!`. The line under the table gives the reason and message.
@@ -74,7 +83,7 @@ In Settings, under `fleetlens`:
 ## Limits of this version
 
 - Read-only. There are no actions yet.
-- No describe view, relations, filter or attach yet.
+- No relations, filter or attach yet.
 - One `fleet list --json` per refresh. Past 256 KiB (about 45 Tasks today),
   the Lens says so instead of parsing a cut answer.
 - POSIX hosts only: the run prints `date +%s` first, because the plugin VM

@@ -15,6 +15,7 @@
 local source = require("thurbox-fleetlens.lib.source")
 local model = require("thurbox-fleetlens.lib.model")
 local view = require("thurbox-fleetlens.lib.view")
+local yaml = require("thurbox-fleetlens.lib.yaml")
 local settings = require("lib.settings")
 
 local NAME = "fleetlens"
@@ -32,8 +33,15 @@ local drawn_kinds = {}
 -- `state` keeps what is assigned to it, not what is changed inside a table it
 -- holds, so a nested `state.sel[kind] = n` would be lost.
 local selection, refreshing = {}, {}
--- How many rows the last render drew, which bounds `j`.
-local drawn_rows = 0
+-- The names of the rows the last render drew, in order, which bound `j` and
+-- turn a clicked name into a position.
+local drawn_names = {}
+-- The resource being read, by name, and how far it is scrolled; nil while the
+-- table is shown. Its object is looked up again on every render, so a refresh
+-- lands in what is being read.
+local detail = nil
+-- How far the last resource drawn could scroll, which bounds `j`.
+local detail_max = 0
 
 local function setting(id, fallback)
   return settings.get(NAME, id, fallback)
@@ -143,7 +151,27 @@ local function render(ctx)
   end
   local selected = math.max(1, math.min(selection[kind] or 1, #rows))
   local banner = now_answer.kind == "error" and now_answer or nil
-  drawn_rows = #rows
+  drawn_names = {}
+  for i, row in ipairs(rows) do
+    drawn_names[i] = row.name
+  end
+  local shown = nil
+  if detail then
+    for i, row in ipairs(rows) do
+      if row.name == detail.name then
+        selected = i
+        local lines = yaml.lines(row.object)
+        detail_max = math.max(0, #lines - view.room(ctx))
+        detail.offset = math.min(detail.offset, detail_max)
+        shown = { title = kind .. "/" .. row.name, lines = lines, offset = detail.offset }
+      end
+    end
+    -- Gone from the list (deleted, or the kind changed under it): back to the
+    -- table, so the keys move rows again.
+    if not shown then
+      detail = nil
+    end
+  end
   return view.render(ctx, {
     where = w.machine .. " · " .. (w.config ~= "" and w.config or "fleet's default config"),
     version = version,
@@ -155,23 +183,68 @@ local function render(ctx)
     loading = now_answer.kind == "pending" and not last,
     stale = banner ~= nil and last ~= nil,
     banner = banner,
+    detail = shown,
   })
 end
 
+--- Move the selection, or scroll the resource being read.
 local function move(delta)
+  if detail then
+    detail.offset = math.max(0, math.min(detail.offset + delta, detail_max))
+    return
+  end
   local kind = state.kind or "Task"
-  selection[kind] = math.max(1, math.min((selection[kind] or 1) + delta, math.max(drawn_rows, 1)))
+  selection[kind] = math.max(1, math.min((selection[kind] or 1) + delta, math.max(#drawn_names, 1)))
 end
 
---- The next kind in the rail, wrapping.
-local function next_kind()
+--- Step `step` kinds along the rail, wrapping either way.
+local function step_kind(step)
   local current = state.kind or "Task"
   for i, k in ipairs(drawn_kinds) do
     if k.kind == current then
-      state.kind = drawn_kinds[i % #drawn_kinds + 1].kind
+      state.kind = drawn_kinds[(i - 1 + step) % #drawn_kinds + 1].kind
+      detail = nil
       return
     end
   end
+end
+
+--- Read the selected row's resource, from the list already held.
+local function open_detail()
+  local kind = state.kind or "Task"
+  local held = good["fl:list:" .. kind]
+  if not held then
+    return
+  end
+  local rows = model.rows(kind, held.value, held.now, {})
+  local row = rows[math.max(1, math.min(selection[kind] or 1, #rows))]
+  if row then
+    detail = { name = row.name, offset = 0 }
+  end
+end
+
+--- Select a kind by name, leaving any resource being read.
+local function select_kind(kind)
+  if type(kind) == "string" and kind ~= (state.kind or "Task") then
+    state.kind = kind
+    detail = nil
+  end
+end
+
+--- Select a row of the current kind by its resource's name.
+local function select_name(name)
+  for i, n in ipairs(drawn_names) do
+    if n == name then
+      selection[state.kind or "Task"] = i
+      return true
+    end
+  end
+  return false
+end
+
+local function close()
+  state.open = false
+  detail = nil
 end
 
 local function refresh()
@@ -187,10 +260,43 @@ local ACTIONS = {
   ["fleetlens.up"] = function()
     move(-1)
   end,
-  ["fleetlens.kind"] = next_kind,
+  ["fleetlens.page_down"] = function()
+    move(10)
+  end,
+  ["fleetlens.page_up"] = function()
+    move(-10)
+  end,
+  ["fleetlens.first"] = function()
+    move(-math.huge)
+  end,
+  ["fleetlens.last"] = function()
+    move(math.huge)
+  end,
+  ["fleetlens.kind"] = function()
+    step_kind(1)
+  end,
+  ["fleetlens.kind_back"] = function()
+    step_kind(-1)
+  end,
+  ["fleetlens.view"] = function(args)
+    if not args.name or select_name(args.name) then
+      open_detail()
+    end
+  end,
+  ["fleetlens.select"] = function(args)
+    select_name(args.name)
+  end,
+  ["fleetlens.select_kind"] = function(args)
+    select_kind(args.kind)
+  end,
   ["fleetlens.refresh"] = refresh,
+  -- Esc steps out of a resource first, then closes.
   ["fleetlens.close"] = function()
-    state.open = false
+    if detail then
+      detail = nil
+    else
+      close()
+    end
   end,
 }
 
@@ -199,7 +305,15 @@ local KEYS = {
   down = "fleetlens.down",
   k = "fleetlens.up",
   up = "fleetlens.up",
+  pagedown = "fleetlens.page_down",
+  pageup = "fleetlens.page_up",
+  home = "fleetlens.first",
+  g = "fleetlens.first",
+  ["end"] = "fleetlens.last",
+  G = "fleetlens.last",
   tab = "fleetlens.kind",
+  backtab = "fleetlens.kind_back",
+  enter = "fleetlens.view",
   R = "fleetlens.refresh",
   esc = "fleetlens.close",
   q = "fleetlens.close",
@@ -235,15 +349,37 @@ return {
     },
   },
   commands = { { action = "fleetlens.toggle", desc = "Fleet: open Lens" } },
+  -- What a click does, as actions anything can invoke by name.
+  actions = {
+    {
+      name = "fleetlens.select_kind",
+      effect = "ui-write",
+      args = { { name = "kind", kind = "string", required = true } },
+    },
+    {
+      name = "fleetlens.select",
+      effect = "ui-write",
+      args = { { name = "name", kind = "string", required = true } },
+    },
+    {
+      name = "fleetlens.view",
+      effect = "ui-write",
+      args = { { name = "name", kind = "string" } },
+    },
+  },
   render = render,
-  on_action = function(action)
+  on_action = function(action, args)
     if action == "fleetlens.toggle" then
-      state.open = not state.open
+      if state.open then
+        close()
+      else
+        state.open = true
+      end
       return true
     end
     local fn = state.open and ACTIONS[action]
     if fn then
-      fn()
+      fn(args or {})
       return true
     end
     return false
@@ -258,9 +394,39 @@ return {
     end
     local action = KEYS[name] or KEYS[key.key]
     if action then
-      ACTIONS[action]()
+      ACTIONS[action]({})
     end
     -- A float takes every key; swallow the rest rather than let them type.
+    return true
+  end,
+  -- A kind selects it; a row selects it, and a second quick press reads it.
+  on_click = function(hit)
+    if not state.open then
+      return false
+    end
+    local id = hit.id or ""
+    local kind = id:match("^kind:(.+)$")
+    local name = id:match("^row:(.+)$")
+    if kind then
+      ACTIONS["fleetlens.select_kind"]({ kind = kind })
+    elseif name then
+      ACTIONS[hit.clicks == 2 and "fleetlens.view" or "fleetlens.select"]({ name = name })
+    end
+    -- Claimed either way, so a press inside the float never reaches below.
+    return true
+  end,
+  -- Ctrl+L / Ctrl+H step through the kinds, as they step through panes.
+  on_focus_cycle = function(direction)
+    if not state.open or detail then
+      return false
+    end
+    step_kind(direction == "next" and 1 or -1)
+    return true
+  end,
+  on_outside = function()
+    if state.open then
+      close()
+    end
     return true
   end,
 }

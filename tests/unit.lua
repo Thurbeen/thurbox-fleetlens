@@ -3,6 +3,7 @@
 
 local source = require("thurbox-fleetlens.lib.source")
 local model = require("thurbox-fleetlens.lib.model")
+local yaml = require("thurbox-fleetlens.lib.yaml")
 
 local failures, count = 0, 0
 local function test(name, fn)
@@ -209,6 +210,77 @@ test("a deleting object is marked", function()
     {}
   )
   eq(rows[1].cells[1], "✕ cr")
+end)
+
+test("a row keeps the object it was built from", function()
+  local obj = { metadata = { name = "a" } }
+  eq(model.rows("Task", { obj }, 0, {})[1].object, obj)
+end)
+
+-- ── yaml.lines ──────────────────────────────────────────────────────────────
+
+local function yaml_of(value)
+  return table.concat(yaml.lines(value), "\n")
+end
+
+test("yaml: the envelope first, then the rest by name", function()
+  eq(
+    yaml_of({
+      status = { phase = "Briefed" },
+      zeta = 1,
+      kind = "Task",
+      apiVersion = "fleet/v1alpha1",
+    }),
+    "apiVersion: fleet/v1alpha1\nkind: Task\nstatus:\n  phase: Briefed\nzeta: 1"
+  )
+end)
+
+test("yaml: only the top level puts the envelope first", function()
+  eq(
+    yaml_of({ spec = { status = "x", kind = "z", a = 1 } }),
+    "spec:\n  a: 1\n  kind: z\n  status: x"
+  )
+end)
+
+test("yaml: a list of maps nests under dashes", function()
+  eq(
+    yaml_of({ conditions = { { type = "Spawned", status = "True" }, { type = "Briefed" } } }),
+    'conditions:\n  - status: "True"\n    type: Spawned\n  - type: Briefed'
+  )
+end)
+
+test("yaml: scalars a reader would misread are quoted", function()
+  eq(
+    yaml_of({
+      a = "",
+      b = "true",
+      c = "42",
+      d = "x: y",
+      e = " pad",
+      f = "null",
+      g = "- x",
+      h = "#c",
+    }),
+    'a: ""\nb: "true"\nc: "42"\nd: "x: y"\ne: " pad"\nf: "null"\ng: "- x"\nh: "#c"'
+  )
+end)
+
+test("yaml: a multi-line string is a block, a plain one is bare", function()
+  eq(
+    yaml_of({ brief = "line one\nline two", name = "fix-login" }),
+    "brief: |-\n  line one\n  line two\nname: fix-login"
+  )
+end)
+
+test("yaml: numbers, booleans and empties", function()
+  eq(
+    yaml_of({ at = 1793301314870, big = 1793301314870.0, half = 0.5, on = true, none = {} }),
+    'at: 1793301314870\nbig: 1793301314870\nhalf: 0.5\nnone: {}\n"on": true'
+  )
+end)
+
+test("yaml: a list of lists and of scalars", function()
+  eq(yaml_of({ m = { { 1, 2 }, "x" } }), "m:\n  - - 1\n    - 2\n  - x")
 end)
 
 print(string.format("%d/%d passed", count - failures, count))

@@ -153,6 +153,7 @@ function M.rows(kind, objects, now, sessions)
       created = created,
       cells = cells,
       tones = tones,
+      object = obj,
     }
   end
   table.sort(rows, function(a, b)

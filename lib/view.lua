@@ -9,9 +9,14 @@
 --   columns = { "NAME", ... }, rows = { model rows }, selected = 1,
 --   loading = bool, stale = bool, banner = { title, detail } | nil,
 --   note = "untrusted text" | nil,
+--   detail = { title = "Task/alpha", lines = { string... }, offset = 0 } | nil,
 -- }
+--
+-- Clicks land by id: `kind:<Kind>` on a rail line, `row:<name>` on a table row.
+-- A footer hint carries `key:<chord>`, so the kernel replays the key itself.
 
 local theme = require("lib.theme")
+local hover = require("lib.hover")
 local widgets = require("lib.widgets")
 
 local M = {}
@@ -80,7 +85,7 @@ local function rail(snap)
     out[#out + 1] = line({
       { text = label .. string.rep(" ", gap), style = { fg = on and theme.accent or theme.text } },
       { text = count, style = { fg = on and theme.accent or theme.muted } },
-    }, on and { style = { bg = theme.role("selection_bg") } } or nil)
+    }, { id = "kind:" .. k.kind, style = on and { bg = theme.role("selection_bg") } or nil })
   end
   return { type = "box", len = RAIL, children = out }
 end
@@ -130,18 +135,92 @@ local function table_body(snap, height)
       style = { fg = theme.bad },
     })
     local selected = i == snap.selected
-    children[#children + 1] =
-      line(spans, selected and { style = { bg = theme.role("selection_bg") } } or nil)
+    children[#children + 1] = line(spans, {
+      id = "row:" .. (row.name or i),
+      style = selected and { bg = theme.role("selection_bg") } or nil,
+    })
   end
   return { type = "box", fill = 1, children = children }
 end
+
+--- How many lines of a resource fit under its title.
+---@param ctx table
+---@return integer
+function M.room(ctx)
+  return math.max(1, M.height(ctx) - 1)
+end
+
+---@param ctx table
+---@return integer
+function M.height(ctx)
+  return math.max(8, math.floor((ctx.height or 40) * 0.9) - 6)
+end
+
+local function detail_body(snap, height)
+  local d = snap.detail
+  local room = math.max(1, height - 1)
+  local offset = math.max(0, math.min(d.offset or 0, #d.lines - room))
+  local last = math.min(#d.lines, offset + room)
+  local children = {
+    line({
+      { text = " " .. d.title, style = { fg = theme.accent, bold = true } },
+      {
+        text = string.format("  · yaml  %d–%d of %d", offset + 1, last, #d.lines),
+        style = { fg = theme.muted },
+      },
+    }),
+  }
+  for i = offset + 1, last do
+    local key, rest = d.lines[i]:match("^(%s*[^%s:][^:]*:)(.*)$")
+    if key and not d.lines[i]:find('^%s*["|]') then
+      children[#children + 1] = line({
+        { text = " " .. key, style = { fg = theme.accent } },
+        { text = rest, style = { fg = theme.text } },
+      })
+    else
+      children[#children + 1] = line({ { text = " " .. d.lines[i], style = { fg = theme.text } } })
+    end
+  end
+  return { type = "box", fill = 1, children = children }
+end
+
+--- The footer: each hint is a button replaying its key.
+local function footer(hints)
+  local spans = { { text = " " } }
+  for i, h in ipairs(hints) do
+    if i > 1 then
+      spans[#spans + 1] = { text = " · ", style = { fg = theme.muted } }
+    end
+    local role = "key:" .. h[1]
+    spans[#spans + 1] = {
+      text = h[2],
+      role = role,
+      style = hover.style(role, hover.button_style(), { fg = theme.muted }),
+    }
+  end
+  return line(spans)
+end
+
+local LIST_HINTS = {
+  { "j", "j/k move" },
+  { "tab", "tab kind" },
+  { "shift+tab", "⇧tab back" },
+  { "enter", "enter view" },
+  { "shift+r", "R refresh" },
+  { "esc", "esc close" },
+}
+local DETAIL_HINTS = {
+  { "j", "j/k scroll" },
+  { "home", "g/G top/end" },
+  { "esc", "esc back" },
+}
 
 --- The whole float.
 ---@param ctx table
 ---@param snap table
 ---@return table
 function M.render(ctx, snap)
-  local height = math.max(8, math.floor((ctx.height or 40) * 0.9) - 6)
+  local height = M.height(ctx)
   local sel = snap.rows[snap.selected]
   local trail = { { text = " ", style = { fg = theme.muted } } }
   if sel and sel.why then
@@ -157,19 +236,14 @@ function M.render(ctx, snap)
         style = { fg = theme.muted },
       },
     }),
-    {
+    snap.detail and detail_body(snap, height) or {
       type = "box",
       axis = "horizontal",
       fill = 1,
       children = { rail(snap), table_body(snap, height) },
     },
     line(trail),
-    line({
-      {
-        text = " j/k move · tab kind · R refresh · esc close",
-        style = { fg = theme.muted },
-      },
-    }),
+    footer(snap.detail and DETAIL_HINTS or LIST_HINTS),
   }
   return {
     type = "box",

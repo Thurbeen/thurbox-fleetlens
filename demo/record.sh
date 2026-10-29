@@ -66,9 +66,10 @@ dir = "fake-host"
 "git.example.invalid" = { kind = "github", cli = "false" }
 TOML
 task() {
-  mkdir -p "$FLEET_DIR/work/$1"
+  # A workspace that need not exist on the fake runtime, and puts no path of
+  # this machine in the YAML on screen.
   printf '{"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"%s"},"spec":{"harness":"sh","host":"local","brief":"%s","workspace":{"dir":"%s"},"dispatch":%s}}' \
-    "$1" "$2" "$FLEET_DIR/work/$1" "$3"
+    "$1" "$2" "/work/acme/$1" "$3"
 }
 printf '[%s,%s,%s,%s]' \
   "$(task fix-login-redirect 'Fix the login redirect.' true)" \
@@ -168,23 +169,34 @@ wait_for 'bump-deps'
 sleep 2.5
 snap 1-open
 # Down the rows: the line under the table follows the selection.
-k j 1.4
-k j 1.4
-k j 1.4
+k j 1.2
+k j 1.2
+k k 1.2
 snap 2-moved
-# Every kind fleet serves; the ChangeRequest the shipped Task declared.
-k Tab 0.8
-k Tab 0.8
+# Read the shipped Task, as YAML, and scroll it.
+k Enter 0.2
+wait_for 'apiVersion: fleet/v1alpha1'
+sleep 2.5
+snap 3-yaml
+for _ in 1 2 3 4 5 6 7 8; do k j 0.25; done
+sleep 1
+k G 2.5
+snap 4-yaml-end
+k Escape 1.2
+# Every kind fleet serves; the ChangeRequest the shipped Task declared, and
+# shift+tab back.
+k Tab 0.6
+k Tab 0.6
 k Tab 0.2
 wait_for 'cr-'
 sleep 2
-snap 3-change-request
-k Tab 0.5
-k Tab 0.5
-k Tab 0.2
+snap 5-change-request
+k BTab 0.6
+k BTab 0.6
+k BTab 0.2
 wait_for 'bump-deps'
 sleep 2
-snap 4-back
+snap 6-back
 k Escape 1.5
 k C-q 2
 for _ in $(seq 20); do [ -s "$CAST" ] && break; sleep 1; done

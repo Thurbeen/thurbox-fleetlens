@@ -76,6 +76,40 @@ wait_gone() {
 row() { capture | grep -E -- "$1" >/dev/null || die "$2"; }
 never() { if capture | grep -Eq -- "$1"; then die "$2"; fi; }
 
+# Press the left button on the first cell of the first match of a regex, the
+# way a terminal reports it (SGR 1006). `click RE 2` is a double-click: both
+# presses land inside the kernel's 400 ms.
+click() {
+  local at x y events=""
+  at="$(capture | python3 -c '
+import re, sys
+for y, line in enumerate(sys.stdin.read().split("\n"), start=1):
+    m = re.search(sys.argv[1], line)
+    if m:
+        print(m.start() + 1, y)
+        break
+' "$1")"
+  [ -n "$at" ] || die "nothing on screen matches '$1' to click"
+  read -r x y <<<"$at"
+  for _ in $(seq "${2:-1}"); do events="$events"$'\e'"[<0;$x;${y}M"$'\e'"[<0;$x;${y}m"; done
+  tmux -L "$SOCKET" send-keys -t lens -l "$events"
+}
+# One wheel notch down (65) or up (64) at the first match of a regex.
+wheel() {
+  local at x y
+  at="$(capture | python3 -c '
+import re, sys
+for y, line in enumerate(sys.stdin.read().split("\n"), start=1):
+    m = re.search(sys.argv[1], line)
+    if m:
+        print(m.start() + 1, y)
+        break
+' "$1")"
+  [ -n "$at" ] || die "nothing on screen matches '$1' to scroll over"
+  read -r x y <<<"$at"
+  tmux -L "$SOCKET" send-keys -t lens -l $'\e'"[<$2;$x;${y}M"
+}
+
 # ── a Fleet store with two Tasks in two phases ──────────────────────────────
 log "seeding a fake-runtime Fleet store"
 FLEET_DIR="$ROOT/fleet"
@@ -173,6 +207,50 @@ wait_for 'No TaskConfigs' "tab did not show the empty TaskConfig list"
 for _ in 1 2 3 4 5; do send Tab; done
 wait_for 'alpha +Pending' "tab did not wrap back to Task"
 
+log "shift+tab steps back, wrapping to the last kind"
+send BTab
+wait_for 'No Listeners' "shift+tab did not wrap from Task to Listener"
+send BTab
+wait_for 'No Conversations' "shift+tab did not step back to Conversation"
+send Tab
+send Tab
+wait_for 'alpha +Pending' "tab did not come back to Task"
+
+log "the mouse: a kind, a row, the wheel, a footer hint"
+click 'TaskConfig'
+wait_for 'No TaskConfigs' "a click on TaskConfig did not select it"
+click 'Task +[0-9]'
+wait_for 'alpha +Pending' "a click on Task did not select it"
+click "$other +[A-Z]"
+wait_for "^│ *│ Task/$other " "a click on row $other did not select it"
+wheel "$other +[A-Z]" 64
+wheel "$other +[A-Z]" 65
+wheel "$other +[A-Z]" 64
+wait_for "^│ *│ Task/$first " "the wheel did not move the selection to $first"
+click 'tab kind'
+wait_for 'No TaskConfigs' "a click on the 'tab kind' hint did not step the kind"
+send BTab
+wait_for 'alpha +Pending' "shift+tab did not come back to Task"
+
+log "a resource's content: Enter or a double-click shows it as YAML"
+send Enter
+wait_for '│ +apiVersion: fleet/v1alpha1' "Enter did not show $first as YAML"
+row "│ +name: $first\b" "the YAML is not $first's"
+row '│ +kind: Task' "the YAML has no 'kind: Task'"
+never 'NAME +PHASE' "the table is still drawn under the YAML"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not go back from the YAML to the table"
+wait_for 'Fleet Lens' "Esc in the YAML closed the Lens"
+# beta was briefed, so its status runs past one screen.
+click 'beta +Briefed' 2
+wait_for '│ +name: beta\b' "a double-click on beta did not show its YAML"
+send End
+wait_gone '│ +apiVersion: ' "End did not scroll the YAML"
+send Home
+wait_for '│ +apiVersion: ' "Home did not scroll back to the top"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave the double-clicked YAML"
+
 log "an unreadable record is Unknown, not empty"
 cp "$FLEET_DIR/data/objects/Task/beta.json" "$ROOT/beta.json.bak"
 printf 'not json' >"$FLEET_DIR/data/objects/Task/beta.json"
@@ -191,5 +269,11 @@ row 'alpha +Pending' "row 'alpha' is gone after recovery"
 log "Esc closes it"
 send Escape
 wait_gone 'Fleet Lens' "Esc did not close the Lens"
+
+log "a click outside closes it too"
+send F2
+wait_for 'alpha +Pending' "F2 did not open the Lens again"
+click 'Multi-Session'
+wait_gone 'Fleet Lens' "a click outside the Lens did not close it"
 
 printf '\033[1;32mPASS\033[0m lens_lists_tasks\n'
