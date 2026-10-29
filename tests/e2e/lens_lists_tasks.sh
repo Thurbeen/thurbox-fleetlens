@@ -155,13 +155,17 @@ wait_for 'Task +2' "the rail has no 'Task  2'"
 wait_for 'alpha +Pending' "no row 'alpha … Pending'"
 row 'beta +Briefed' "no row 'beta … Briefed'"
 
-# One `apply` made both, so they tie on age and order by name.
+# One `apply` made both, a millisecond or none apart, so which is newest and
+# drawn first depends on the machine. The test reads it rather than assuming.
 log "j and k move the selection"
-wait_for '^│ *│ Task/alpha ' "the first row, alpha, is not selected"
+wait_for '^│ *│ Task/(alpha|beta) ' "no Task is selected"
+first="$(capture | grep -Eo '^│ *│ Task/(alpha|beta) ' | grep -Eo 'alpha|beta')"
+other=alpha
+[ "$first" = alpha ] && other=beta
 send j
-wait_for '^│ *│ Task/beta ' "j did not move the selection to beta"
+wait_for "^│ *│ Task/$other " "j did not move the selection from $first to $other"
 send k
-wait_for '^│ *│ Task/alpha ' "k did not move the selection back to alpha"
+wait_for "^│ *│ Task/$first " "k did not move the selection back to $first"
 
 log "tab steps to the next kind; an empty kind says so"
 send Tab
