@@ -13,8 +13,9 @@
 --     (`lines` as `yaml.wrap` breaks them, at `M.text_width`)
 -- }
 --
--- Clicks land by id: `kind:<Kind>` on a rail line, `row:<name>` on a table row.
--- A footer hint carries `key:<chord>`, so the kernel replays the key itself.
+-- Clicks land by id: `kind:<Kind>` on a rail line, `row:<name>` on a table row,
+-- `rel:<Kind>/<name>` on a relation in the trail. A footer hint carries
+-- `key:<chord>`, so the kernel replays the key itself.
 
 local theme = require("lib.theme")
 local hover = require("lib.hover")
@@ -237,6 +238,16 @@ function M.render(ctx, snap)
     trail = { { text = " ! " .. sel.why, style = { fg = theme.bad } } }
   elseif sel then
     trail = { { text = " " .. snap.kind .. "/" .. (sel.name or ""), style = { fg = theme.muted } } }
+  end
+  for i, r in ipairs(sel and sel.related or {}) do
+    trail[#trail + 1] = { text = i == 1 and "  → " or "  ", style = { fg = theme.muted } }
+    local ref = r.kind .. "/" .. r.name
+    local id = "rel:" .. ref
+    trail[#trail + 1] = {
+      text = ref,
+      id = id,
+      style = hover.id(id) and hover.button_style() or { fg = theme.accent, underline = true },
+    }
   end
   local body = {
     line({

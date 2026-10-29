@@ -42,6 +42,9 @@ local drawn_names = {}
 local detail = nil
 -- How far the last resource drawn could scroll, which bounds `j`.
 local detail_max = 0
+-- A relation followed: its kind, the name to select once that kind's rows are
+-- held, and whether to read it, as a link clicked while reading does.
+local wanted = nil
 
 local function setting(id, fallback)
   return settings.get(NAME, id, fallback)
@@ -145,6 +148,15 @@ local function render(ctx)
   local kind = state.kind or "Task"
   local now_answer, last = ask("fl:list:" .. kind, { "list", kind:lower(), "--json" }, LIST_TTL, w)
   local rows = last and model.rows(kind, last.value, last.now, sessions()) or {}
+  if wanted and (wanted.kind ~= kind or last) then
+    for i, row in ipairs(wanted.kind == kind and rows or {}) do
+      if row.name == wanted.name then
+        selection[kind] = i
+        detail = wanted.read and { name = row.name, offset = 0 } or nil
+      end
+    end
+    wanted = nil
+  end
   for _, k in ipairs(list) do
     local held = good["fl:list:" .. k.kind]
     k.count = held and #held.value or nil
@@ -242,6 +254,15 @@ local function select_name(name)
   return false
 end
 
+--- Go to the resource a relation names: its kind, then its row once listed.
+local function follow(kind, name)
+  if type(kind) == "string" and type(name) == "string" then
+    wanted = { kind = kind, name = name, read = detail ~= nil }
+    state.kind = kind
+    detail = nil
+  end
+end
+
 local function close()
   state.open = false
   detail = nil
@@ -288,6 +309,9 @@ local ACTIONS = {
   end,
   ["fleetlens.select_kind"] = function(args)
     select_kind(args.kind)
+  end,
+  ["fleetlens.follow"] = function(args)
+    follow(args.kind, args.name)
   end,
   ["fleetlens.refresh"] = refresh,
   -- Esc steps out of a resource first, then closes.
@@ -366,6 +390,14 @@ return {
       effect = "ui-write",
       args = { { name = "name", kind = "string" } },
     },
+    {
+      name = "fleetlens.follow",
+      effect = "ui-write",
+      args = {
+        { name = "kind", kind = "string", required = true },
+        { name = "name", kind = "string", required = true },
+      },
+    },
   },
   render = render,
   on_action = function(action, args)
@@ -399,7 +431,8 @@ return {
     -- A float takes every key; swallow the rest rather than let them type.
     return true
   end,
-  -- A kind selects it; a row selects it, and a second quick press reads it.
+  -- A kind selects it; a row selects it, and a second quick press reads it; a
+  -- relation goes to the resource it names.
   on_click = function(hit)
     if not state.open then
       return false
@@ -407,8 +440,11 @@ return {
     local id = hit.id or ""
     local kind = id:match("^kind:(.+)$")
     local name = id:match("^row:(.+)$")
+    local to, named = id:match("^rel:([^/]+)/(.+)$")
     if kind then
       ACTIONS["fleetlens.select_kind"]({ kind = kind })
+    elseif to then
+      ACTIONS["fleetlens.follow"]({ kind = to, name = named })
     elseif name then
       ACTIONS[hit.clicks == 2 and "fleetlens.view" or "fleetlens.select"]({ name = name })
     end

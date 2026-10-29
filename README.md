@@ -40,8 +40,17 @@ commands.
 | `esc`, `q` | Back from a resource; close |
 
 The mouse works too: click a kind or a row to select it, double-click a row
-to read it, click a hint in the footer to do what it says, and click outside
-the Lens to close it.
+to read it, turn the wheel to move or to scroll a resource, click a hint in
+the footer to do what it says, and click outside the Lens to close it.
+
+The line under the table links what the selected resource names: a Task's
+TaskConfig and the resources it declared (its ChangeRequests), a TaskConfig's
+EnvProviders. Click one to go to it; clicked while reading a resource, it
+reads the linked one.
+
+To copy text, hold `Shift` and drag: in most terminals that is their own
+selection. thurbox's drag-to-copy covers terminal panes only, not a plugin's
+float.
 
 A resource is the object fleet returned for the list, as YAML: the envelope
 first, then every field by name. A line wider than the Lens wraps, and goes
@@ -84,7 +93,8 @@ In Settings, under `fleetlens`:
 ## Limits of this version
 
 - Read-only. There are no actions yet.
-- No relations, filter or attach yet.
+- Relations go one way: a ChangeRequest does not link back to its Task.
+- No filter or attach yet.
 - One `fleet list --json` per refresh. Past 256 KiB (about 45 Tasks today),
   the Lens says so instead of parsing a cut answer.
 - POSIX hosts only: the run prints `date +%s` first, because the plugin VM

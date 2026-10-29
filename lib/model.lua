@@ -5,7 +5,8 @@
 -- (`phase`, `conditions`, `observedGeneration`). Task has its own spec.
 --
 -- A row is { name, attention, why, created, cells = { string... },
--- tones = { role|nil... } }, where a tone names a theme role for that cell.
+-- tones = { role|nil... }, related = { { kind, name }... } }, where a tone
+-- names a theme role for that cell.
 
 local M = {}
 
@@ -115,6 +116,33 @@ local function task_cells(obj, sessions)
   }
 end
 
+--- The resources an object names, as { kind, name }: a Task's TaskConfig and
+--- what it declared, a TaskConfig's EnvProviders. Malformed references are
+--- skipped.
+---@param kind string
+---@param obj table
+---@return table[]
+function M.relations(kind, obj)
+  local out = {}
+  local function add(to, name)
+    if type(to) == "string" and type(name) == "string" and name ~= "" then
+      out[#out + 1] = { kind = to, name = name }
+    end
+  end
+  local spec = obj.spec or {}
+  if kind == "Task" then
+    add("TaskConfig", (spec.configRef or {}).name)
+    for _, fact in ipairs((obj.status or {}).declared or {}) do
+      add(fact.kind, fact.name)
+    end
+  elseif kind == "TaskConfig" then
+    for _, ref in ipairs(spec.envFrom or {}) do
+      add("EnvProvider", ref.name)
+    end
+  end
+  return out
+end
+
 --- Rows for one kind: attention first, then newest.
 ---@param kind string
 ---@param objects table[]
@@ -153,6 +181,7 @@ function M.rows(kind, objects, now, sessions)
       created = created,
       cells = cells,
       tones = tones,
+      related = M.relations(kind, obj),
       object = obj,
     }
   end
