@@ -97,8 +97,8 @@ session vanished, so it needs attention; one shipped with a declared
 ChangeRequest; one stuck; one waiting), and records the pane with asciinema,
 driven by tmux because VHS cannot press F2, then renders it with agg. It also
 needs `asciinema` and `agg`, takes `THURBOX_BIN` / `FLEET_BIN` like the e2e,
-and refuses to render a cast that contains the machine's user name, host name
-or paths. The store's path shows in a "could not tell" banner, so the take
+and refuses to render a cast that contains the user name, the host name, the
+checkout's path or the sandbox's. The store's path shows in a "could not tell" banner, so the take
 leaves that state out; the e2e covers it.
 
 ## License
