@@ -4,7 +4,7 @@ A [thurbox](https://github.com/Thurbeen/thurbox) pane that browses
 [Fleet](https://github.com/Thurbeen/fleet) v2 resources: every kind Fleet
 serves, Tasks first, in one keyboard-first float.
 
-![Fleet Lens in thurbox's Doom theme: F2 opens it on four Tasks, the one that needs attention on top; j and k move; enter reads the shipped Task as YAML and j and G scroll it; tab steps through the kinds to the ChangeRequest it declared and shift+tab steps back; esc closes it](media/demo.gif)
+![Fleet Lens in thurbox's Doom theme: Alt+K opens it on four Tasks, the one that needs attention on top; j and k move; enter reads the shipped Task as YAML and j and G scroll it; tab steps through the kinds to the ChangeRequest it declared and shift+tab steps back; esc closes it](media/demo.gif)
 
 The recording is a released thurbox (v2.76.2) and fleet (v2.3.0) with a
 throwaway HOME and a scratch Fleet store on the fake runtime, so no agent runs
@@ -20,7 +20,7 @@ thurbox-cli plugin check
 ```
 
 Then trust it, because it runs `fleet`: Settings (`Ctrl+,`) → `]` → select
-`thurbox-fleetlens/plugins/88_fleet_lens.lua` → `t`. Until then, F2 opens the
+`thurbox-fleetlens/plugins/88_fleet_lens.lua` → `t`. Until then, Alt+K opens the
 pane and it tells you this.
 
 `thurbox-cli plugin update` fetches a newer version. A changed file of an
@@ -31,7 +31,7 @@ commands.
 
 | Key | Does |
 | --- | --- |
-| `F2` | Open or close the Lens (also in the palette as "Fleet: open Lens") |
+| `Alt+K` | Open or close the Lens (also in the palette as "Fleet: open Lens") |
 | `j` / `k`, `↓` / `↑`, the wheel | Move, or scroll a resource |
 | `PgDn` / `PgUp`, `g` / `G`, `Home` / `End` | Ten rows, or to the first / last |
 | `tab` / `shift+tab`, `Ctrl+L` / `Ctrl+H` | Next / previous kind |
@@ -104,7 +104,7 @@ The end-to-end test needs `tmux`, `python3`, `thurbox`, `thurbox-cli` and
 `demo/record.sh` builds the same kind of sandbox, seeds four Tasks (one whose
 session vanished, so it needs attention; one shipped with a declared
 ChangeRequest; one stuck; one waiting), and records the pane with asciinema,
-driven by tmux because VHS cannot press F2, then renders it with agg. It also
+driven by tmux so the keys are real ones, then renders it with agg. It also
 needs `asciinema` and `agg`, takes `THURBOX_BIN` / `FLEET_BIN` like the e2e,
 and refuses to render a cast that contains the user name, the host name, the
 checkout's path or the sandbox's. The store's path shows in a "could not tell" banner, so the take

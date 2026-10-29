@@ -3,9 +3,9 @@
 # Record media/demo.gif: the Lens in a real thurbox, against a scratch Fleet
 # store on the fake runtime, so no agent runs and nothing real is read.
 #
-# asciinema records the pty and agg rasterises the cast. Not VHS: it drives a
-# headless browser and cannot send F2. tmux presses the keys, so what lands in
-# the cast is the pane reacting to real keys.
+# asciinema records the pty and agg rasterises the cast, as the sibling
+# plugins' demos do. tmux presses the keys, so what lands in the cast is the
+# pane reacting to real keys.
 #
 # Needs: asciinema, agg, tmux, python3, and thurbox, thurbox-cli and fleet on
 # PATH (or THURBOX_BIN / FLEET_BIN naming their directories).
@@ -164,7 +164,7 @@ sleep 2
 snap 0-start
 
 # Open it: Tasks first, the one that needs a person on top.
-k F2 0.2
+k M-k 0.2
 wait_for 'bump-deps'
 sleep 2.5
 snap 1-open

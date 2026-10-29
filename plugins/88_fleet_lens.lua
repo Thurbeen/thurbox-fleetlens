@@ -1,6 +1,6 @@
 -- Fleet Lens: every Fleet v2 resource kind, browsed from one float.
 --
--- F2 opens it. It reads Fleet only through `fleet … --json`, run with the `run`
+-- Alt+K opens it. It reads Fleet only through `fleet … --json`, run with the `run`
 -- capability on the machine the `machine` setting names, and draws what came
 -- back. It writes nothing to Fleet.
 --
@@ -341,7 +341,7 @@ return {
   },
   keys = {
     {
-      key = "f2",
+      key = "alt+k",
       action = "fleetlens.toggle",
       desc = "open or close Fleet Lens",
       scope = "global",

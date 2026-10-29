@@ -10,7 +10,7 @@
 # float, so it needs no layout slot.
 #
 # One capability is asked for: `run`, to execute `fleet … --json`. Until you
-# trust the pane, F2 opens it and it says so.
+# trust the pane, Alt+K opens it and it says so.
 name = "fleet-lens"
 description = "Browse Fleet v2 resources — Tasks first — in a keyboard-first float"
 version = "v0.1.0"

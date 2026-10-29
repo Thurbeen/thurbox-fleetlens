@@ -182,8 +182,11 @@ tmux -L "$SOCKET" new-session -d -s lens -x "$COLS" -y "$ROWS" \
 wait_for '.' "thurbox drew nothing" 100
 sleep 1
 
-log "F2 opens the Lens"
+log "alt+k opens the Lens, and F2 is left to other panes"
 send F2
+sleep 1
+never 'Fleet Lens' "F2 opened the Lens; it belongs to the info panel"
+send M-k
 wait_for 'Fleet Lens' "frame has no 'Fleet Lens'"
 wait_for 'Task +2' "the rail has no 'Task  2'"
 wait_for 'alpha +Pending' "no row 'alpha … Pending'"
@@ -270,9 +273,13 @@ log "Esc closes it"
 send Escape
 wait_gone 'Fleet Lens' "Esc did not close the Lens"
 
-log "a click outside closes it too"
-send F2
-wait_for 'alpha +Pending' "F2 did not open the Lens again"
+log "alt+k closes it again, and a click outside closes it too"
+send M-k
+wait_for 'alpha +Pending' "alt+k did not open the Lens again"
+send M-k
+wait_gone 'Fleet Lens' "alt+k did not close the Lens"
+send M-k
+wait_for 'alpha +Pending' "alt+k did not reopen the Lens"
 click 'Multi-Session'
 wait_gone 'Fleet Lens' "a click outside the Lens did not close it"
 
