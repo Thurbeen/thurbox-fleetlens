@@ -127,14 +127,24 @@ local function untrusted(ctx)
   })
 end
 
+local function get_key(kind, name)
+  return "fl:get:" .. kind .. "/" .. name
+end
+
+--- Start reading a resource with a fresh `fleet get`, so an answer held from
+--- an earlier read, such as one that found it gone, is not drawn for this one.
+local function start_reading(kind, name)
+  local key = get_key(kind, name)
+  seen[key], said[key], good[key] = (thurbox.runs or {})[key], { kind = "pending" }, nil
+  refreshing[key] = true
+  return { name = name, offset = 0 }
+end
+
 --- The resource being read, whole, from `fleet get`: the list holds it trimmed.
 local function read(ctx, w, kind, name)
   local title = kind .. "/" .. name
   local answer, held =
-    ask("fl:get:" .. title, source.command(w, { "get", kind:lower(), name }), LIST_TTL, w)
-  if answer.gone then
-    return { gone = true }
-  end
+    ask(get_key(kind, name), source.command(w, { "get", kind:lower(), name }), LIST_TTL, w)
   local banner = answer.kind == "error" and answer or nil
   if not held then
     return { title = title, loading = true, lines = {}, offset = 0, banner = banner }
@@ -163,7 +173,7 @@ local function render(ctx)
     for i, row in ipairs(wanted.kind == kind and rows or {}) do
       if row.name == wanted.name then
         selection[kind] = i
-        detail = wanted.read and { name = row.name, offset = 0 } or nil
+        detail = wanted.read and start_reading(kind, row.name) or nil
       end
     end
     wanted = nil
@@ -187,9 +197,8 @@ local function render(ctx)
         banner = banner or shown.banner
       end
     end
-    if not shown or shown.gone then
+    if not shown then
       detail = nil
-      shown = nil
     end
   end
   return view.render(ctx, {
@@ -239,7 +248,7 @@ local function open_detail()
   local rows = model.rows(kind, held.value, held.now)
   local row = rows[math.max(1, math.min(selection[kind] or 1, #rows))]
   if row then
-    detail = { name = row.name, offset = 0 }
+    detail = start_reading(kind, row.name)
   end
 end
 
@@ -280,7 +289,7 @@ local function refresh()
   local kind = state.kind or "Task"
   refreshing["fl:list:" .. kind] = true
   if detail then
-    refreshing["fl:get:" .. kind .. "/" .. detail.name] = true
+    refreshing[get_key(kind, detail.name)] = true
   end
   refreshing["fl:version"] = true
   refreshing["fl:plugins"] = true

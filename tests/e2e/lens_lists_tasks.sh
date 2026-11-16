@@ -393,6 +393,27 @@ wait_for 'Task/big-2 +· yaml +1–[0-9]+ of [0-9]{3,}' "big-2's YAML does not c
 send Escape
 wait_for 'NAME +PHASE' "Esc did not leave big-2's YAML"
 
+log "a resource deleted while read, then made again, reads again"
+click 'big-3 +Pending' 2
+wait_for 'Task/big-3 +· yaml' "a double-click on big-3 did not show its YAML"
+fleet_ delete task big-3 >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+send R
+wait_for 'NAME +PHASE' "deleting big-3 did not take the Lens back to the table"
+wait_gone 'big-3 +' "big-3 is still listed after its deletion"
+python3 - "$FLEET_DIR/big.json" >"$FLEET_DIR/big-3.json" <<'PY'
+import json, sys
+print(json.dumps([t for t in json.load(open(sys.argv[1])) if t["metadata"]["name"] == "big-3"]))
+PY
+fleet_ apply -f "$FLEET_DIR/big-3.json" >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+send R
+wait_for 'big-3 +Pending' "big-3 is not listed again"
+click 'big-3 +Pending' 2
+wait_for 'Task/big-3 +· yaml' "a double-click on the new big-3 did not show its YAML"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave big-3's YAML"
+
 log "Esc closes it"
 send Escape
 wait_gone 'Fleet Lens' "Esc did not close the Lens"
