@@ -2,16 +2,17 @@
 --
 -- Pure: objects in, rows out. Every kind gets the generic columns, built only
 -- from Fleet's envelope and the status conventions `fleet status` understands
--- (`phase`, `conditions`, `observedGeneration`). Task has its own spec.
+-- (`phase`, `conditions`, `observedGeneration`). Task and ChangeRequest have
+-- their own.
 --
--- A row is { name, attention, why, created, cells = { string... },
+-- A row is { name, marker, why, created, cells = { string... },
 -- tones = { role|nil... }, related = { { kind, name }... } }, where a tone
 -- names a theme role for that cell.
 
 local M = {}
 
---- A Task condition a person must answer. Drawn as `!`, not as a glyph.
 local ATTENTION = "NeedsAttention"
+local DROPPED = "…"
 
 local GLYPH = { True = "●", False = "○" }
 
@@ -62,14 +63,36 @@ function M.attention(conditions)
   return nil
 end
 
+--- The first Question the worker declared that nobody has answered yet.
+---@param status table
+---@return string|nil
+function M.question(status)
+  local answered = status.answered or {}
+  for _, fact in ipairs(status.declared or {}) do
+    if fact.kind == "Question" and type(fact.id) == "string" and not answered[fact.id] then
+      if type(fact.text) ~= "string" or fact.text == "" or fact.text == DROPPED then
+        return fact.id .. " waits for an answer"
+      end
+      return fact.id .. ": " .. (fact.text:match("[^\n]+") or "")
+    end
+  end
+  return nil
+end
+
+local SETTLED = { Concluded = true, Settled = true }
+
 local function phase_tone(phase)
-  if phase == "Concluded" or phase == "Settled" then
+  if SETTLED[phase] then
     return "success"
   elseif phase == "Stalled" then
     return "error"
   end
   return nil
 end
+
+local AGENT_TONE = { attention = "warning", idle = "muted", unknown = "muted" }
+local SESSION_TONE = { Lost = "error", Gone = "error", Paused = "muted", Idle = "muted" }
+local RESULT_TONE = { shipped = "success", stuck = "warning", failed = "error" }
 
 local function observed(obj)
   local status = obj.status or {}
@@ -82,20 +105,48 @@ end
 ---@return string[]
 function M.columns(kind)
   if kind == "Task" then
-    return { "NAME", "PHASE", "COND", "SESSION", "GEN", "RESULT", "CR", "AGE" }
+    return { "NAME", "PHASE", "AGENT", "SESSION", "GEN", "RESULT", "CR", "AGE" }
+  elseif kind == "ChangeRequest" then
+    return { "NAME", "CHANGE", "PHASE", "COND", "SYNC", "AGE" }
   end
   return { "NAME", "PHASE", "COND", "SYNC", "AGE" }
 end
 
-local function task_cells(obj, sessions)
+--- A change's URL as `owner/repo#N` (GitHub) or `group/project!N` (GitLab).
+---@param url string|nil
+---@return string
+function M.change(url)
+  if type(url) ~= "string" or url == "" then
+    return "-"
+  end
+  local repo, n = url:match("^https?://[^/]+/(.-)/pull/(%d+)")
+  if repo then
+    return repo .. "#" .. n
+  end
+  repo, n = url:match("^https?://[^/]+/(.-)/%-/merge_requests/(%d+)")
+  if repo then
+    return repo .. "!" .. n
+  end
+  return url
+end
+
+local function session_cell(status)
+  local state = status.sessionState
+  if not status.session and not state then
+    return "-", nil
+  end
+  local host = (status.session or {}).host
+  local text = state or "?"
+  if host and host ~= "local" then
+    text = host .. " " .. text
+  end
+  return text, SESSION_TONE[state]
+end
+
+local function task_cells(obj)
   local status = obj.status or {}
   local meta = obj.metadata or {}
-  local session = status.session
-  local live = session and sessions[session.id] or nil
-  local where = "-"
-  if session then
-    where = (session.host or "?") .. " " .. (live or "gone")
-  end
+  local session, session_tone = session_cell(status)
   local gen = "-"
   if status.brief and status.brief.generation then
     gen = string.format("%d/%d", status.brief.generation, meta.generation or 0)
@@ -107,11 +158,12 @@ local function task_cells(obj, sessions)
     end
   end
   local outcome = status.result and status.result.outcome or "-"
-  local result_tone = ({ shipped = "success", stuck = "warning", failed = "error" })[outcome]
-  return { where, gen, outcome, crs > 0 and tostring(crs) or "-" }, {
-    live and nil or "muted",
+  local agent = status.agentState or "-"
+  return { agent, session, gen, outcome, crs > 0 and tostring(crs) or "-" }, {
+    AGENT_TONE[agent],
+    session_tone,
     gen ~= "-" and status.brief.generation ~= meta.generation and "error" or nil,
-    result_tone,
+    RESULT_TONE[outcome],
     nil,
   }
 end
@@ -143,41 +195,59 @@ function M.relations(kind, obj)
   return out
 end
 
---- Rows for one kind: attention first, then newest.
+local function needs_person(row)
+  return row.marker ~= nil
+end
+
+--- Rows for one kind: what needs a person first, then open work, then newest.
 ---@param kind string
 ---@param objects table[]
 ---@param now number|nil seconds since the epoch
----@param sessions table<string, string> thurbox session id → its status
 ---@return table[]
-function M.rows(kind, objects, now, sessions)
+function M.rows(kind, objects, now)
   local rows = {}
   for _, obj in ipairs(objects or {}) do
     local meta = obj.metadata or {}
     local status = obj.status or {}
     local created = meta.creationTimestamp or 0
-    local why = kind == "Task" and M.attention(status.conditions) or nil
+    local marker, why = nil, nil
+    if kind == "Task" then
+      why = M.attention(status.conditions)
+      marker = why and "!" or nil
+      if not why then
+        why = M.question(status)
+        marker = why and "?" or nil
+      end
+    end
     local name = meta.name or "?"
     if meta.deletionTimestamp then
       name = "✕ " .. name
     end
-    local cells = { name, status.phase or "-", M.glyphs(status.conditions) }
-    local tones = { why and "error" or nil, phase_tone(status.phase), nil }
+    local cells, tones = { name }, { marker == "!" and "error" or nil }
+    local function add(cell, tone)
+      cells[#cells + 1] = cell
+      tones[#cells] = tone
+    end
+    if kind == "ChangeRequest" then
+      add(M.change((obj.spec or {}).url))
+    end
+    add(status.phase or "-", phase_tone(status.phase))
     if kind == "Task" then
-      local extra, extra_tones = task_cells(obj, sessions or {})
-      for i = 1, 4 do
-        cells[#cells + 1] = extra[i]
-        tones[#cells] = extra_tones[i]
+      local extra, extra_tones = task_cells(obj)
+      for i = 1, #extra do
+        add(extra[i], extra_tones[i])
       end
     else
+      add(M.glyphs(status.conditions))
       local seen, gen = observed(obj)
-      cells[#cells + 1] = seen == gen and "✓" or "±"
-      tones[#cells] = seen ~= gen and "warning" or nil
+      add(seen == gen and "✓" or "±", seen ~= gen and "warning" or nil)
     end
-    cells[#cells + 1] = M.age(now and (now - math.floor(created / 1000)) or nil)
+    add(M.age(now and (now - math.floor(created / 1000)) or nil))
     rows[#rows + 1] = {
       name = meta.name,
-      attention = why ~= nil,
+      marker = marker,
       why = why,
+      settled = SETTLED[status.phase] == true,
       created = created,
       cells = cells,
       tones = tones,
@@ -186,8 +256,11 @@ function M.rows(kind, objects, now, sessions)
     }
   end
   table.sort(rows, function(a, b)
-    if a.attention ~= b.attention then
-      return a.attention
+    if needs_person(a) ~= needs_person(b) then
+      return needs_person(a)
+    end
+    if a.settled ~= b.settled then
+      return b.settled
     end
     if a.created ~= b.created then
       return a.created > b.created

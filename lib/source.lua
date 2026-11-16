@@ -28,14 +28,7 @@ function M.quote(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
---- The shell command for one fleet call.
----
---- `date +%s` comes first because the plugin VM has no clock, and an age needs
---- one. `exec` hands the exit status to fleet, which is the status classified.
----@param settings { bin: string, config: string }
----@param args string[]
----@return string
-function M.command(settings, args)
+local function fleet_words(settings, args)
   local words = { M.quote(settings.bin ~= "" and settings.bin or "fleet") }
   if settings.config and settings.config ~= "" then
     words[#words + 1] = "--config"
@@ -44,7 +37,81 @@ function M.command(settings, args)
   for _, arg in ipairs(args) do
     words[#words + 1] = M.quote(arg)
   end
-  return "date +%s; exec " .. table.concat(words, " ")
+  return table.concat(words, " ")
+end
+
+--- The shell command for one fleet call.
+---
+--- `date +%s` comes first because the plugin VM has no clock, and an age needs
+--- one. `exec` hands the exit status to fleet, which is the status classified.
+---@param settings { bin: string, config: string }
+---@param args string[]
+---@return string
+function M.command(settings, args)
+  return "date +%s; exec " .. fleet_words(settings, args)
+end
+
+M.LIST_FIELDS = {
+  "phase",
+  "conditions",
+  "observedGeneration",
+  "session",
+  "sessionState",
+  "agentState",
+  "brief",
+  "result",
+  "declared",
+  "answered",
+  "configRef",
+  "envFrom",
+  "url",
+}
+
+-- Reads fleet's pretty-printed JSON, one value per line at two spaces a level:
+-- a resource's spec and status members sit at indent 6, and no string spans a
+-- line, so a line can be dropped or shortened without parsing the JSON.
+local TRIM = [[
+{
+  match($0, /^ */)
+  ind = RLENGTH
+  line = substr($0, ind + 1)
+  if (skip) {
+    if (ind == 6 && line ~ /^[]}]/) skip = 0
+    next
+  }
+  if (ind == 4) section = line
+  if (ind == 6 && line ~ /^"/ && section ~ /^"(spec|status)"/) {
+    key = line
+    sub(/^"/, "", key)
+    sub(/".*/, "", key)
+    if (index(keep, " " key " ") == 0) {
+      if (line ~ /[[{]$/) skip = 1
+      next
+    }
+  }
+  if (length(line) > 240) sub(/"(\\.|[^"\\])*",?$/, "\"…\"", line)
+  sub(/,$/, "", line)
+  if (have) printf "%s%s", prev, (line ~ /^[]}]/ || prev ~ /[[{]$/) ? "" : ","
+  prev = line
+  have = 1
+}
+END { if (have) print prev }
+]]
+
+--- The shell command listing one kind, trimmed on the host to the fields
+--- `LIST_FIELDS` names and with long strings dropped, so a long list fits one
+--- run's 256 KiB. The exit status is still fleet's.
+---@param settings { bin: string, config: string }
+---@param kind string
+---@return string
+function M.list_command(settings, kind)
+  return "date +%s; out=$("
+    .. fleet_words(settings, { "list", kind:lower(), "--json" })
+    .. "); s=$?; printf '%s\\n' \"$out\" | awk -v keep="
+    .. M.quote(" " .. table.concat(M.LIST_FIELDS, " ") .. " ")
+    .. " "
+    .. M.quote(TRIM)
+    .. "; exit $s"
 end
 
 --- The first stderr line fleet wrote, without its `error: ` prefix.

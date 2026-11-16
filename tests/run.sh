@@ -15,4 +15,4 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 ln -s "$HERE" "$ROOT/thurbox-fleetlens"
 
-LUA_PATH="$ROOT/?.lua" "$LUA" "$HERE/tests/unit.lua"
+FAKE_FLEET="$HERE/tests/fake-fleet.sh" LUA_PATH="$ROOT/?.lua" "$LUA" "$HERE/tests/unit.lua"

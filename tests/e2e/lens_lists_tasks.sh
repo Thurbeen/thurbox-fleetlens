@@ -126,9 +126,9 @@ cat >"$FLEET_DIR/tasks.json" <<JSON
 [{"apiVersion":"fleet/v1alpha1","kind":"TaskConfig","metadata":{"name":"defaults"},
   "spec":{"harness":"sh"}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"alpha"},
-  "spec":{"harness":"sh","configRef":{"name":"defaults"},"host":"local","brief":"Wait for the release branch to be cut, then check every service in the monorepo still builds against it, list the ones that do not, and open one issue per failing service with the build log attached so the owners can pick them up tomorrow morning before standup end-of-brief.","workspace":{"dir":"$FLEET_DIR/work/alpha"},"dispatch":false}},
+  "spec":{"harness":"sh","configRef":{"name":"defaults"},"host":"local","brief":"Wait for the release branch to be cut, then check every service in the monorepo still builds against it, list the ones that do not, and open one issue per failing service with the build log attached so the owners can pick them up tomorrow morning before standup end-of-brief.","workspace":["file://$FLEET_DIR/work/alpha"],"dispatch":false}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"beta"},
-  "spec":{"harness":"sh","host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
+  "spec":{"harness":"sh","host":"local","brief":"Go.","workspace":["file://$FLEET_DIR/work/beta"],"dispatch":true}}]
 JSON
 fleet_() { "$FLEET" --config "$FLEET_DIR/fleet.toml" "$@"; }
 fleet_ apply -f "$FLEET_DIR/tasks.json" >/dev/null
@@ -156,11 +156,12 @@ file = "thurbox-fleetlens/plugins/88_fleet_lens.lua"
 TOML
 
 # `run` is absent until the file is trusted. There is no `plugin trust`, so this
-# writes the record the Interface tab's `t` writes: the absolute path against an
-# FNV-1a digest of the file (`kernel::bundled::digest`).
+# writes the record the Interface tab's `t` writes into plugin-state.json: the
+# absolute path against an FNV-1a digest of the file (`kernel::bundled::digest`).
+# The file is not synced, so no lock covers it and a bare digest is its grant.
 PANE="$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua"
 if [ -f "$PANE" ]; then
-  python3 - "$PANE" "$CONFIG/ui.json" <<'PY'
+  python3 - "$PANE" "$CONFIG/plugin-state.json" <<'PY'
 import json, pathlib, sys
 pane, out = sys.argv[1], pathlib.Path(sys.argv[2])
 h = 0xCBF29CE484222325
@@ -172,15 +173,22 @@ out.write_text(json.dumps(held, indent=2))
 PY
 fi
 
-# The Lens reads FLEET_CONFIG through fleet's own resolution when its config
-# setting is empty, and finds `fleet` on PATH.
-export FLEET_CONFIG="$FLEET_DIR/fleet.toml"
+# The Lens finds the store through its `config` setting and `fleet` on PATH.
+# thurbox itself gets no FLEET_CONFIG: from 3.x it would run its own engine on
+# the store, which holds the lease this test's `reconcile` needs.
+python3 - "$CONFIG/ui.json" "$FLEET_DIR/fleet.toml" <<'PY'
+import json, pathlib, sys
+out = pathlib.Path(sys.argv[1])
+held = json.loads(out.read_text()) if out.exists() else {}
+held.setdefault("settings", {})["fleetlens.config"] = sys.argv[2]
+out.write_text(json.dumps(held, indent=2))
+PY
 export PATH="$(dirname "$FLEET"):$PATH"
 
 # ── the scenario ────────────────────────────────────────────────────────────
 log "launching thurbox (${COLS}x${ROWS})"
 tmux -L "$SOCKET" new-session -d -s lens -x "$COLS" -y "$ROWS" \
-  "env PATH='$PATH' FLEET_CONFIG='$FLEET_CONFIG' '$THURBOX'"
+  "env PATH='$PATH' '$THURBOX'"
 wait_for '.' "thurbox drew nothing" 100
 sleep 1
 
@@ -206,17 +214,23 @@ wait_for "^│ *│ Task/$other " "j did not move the selection from $first to $
 send k
 wait_for "^│ *│ Task/$first " "k did not move the selection back to $first"
 
+# The rail is the kinds fleet serves, in its order; the test reads them rather
+# than assuming a release's list.
+mapfile -t KINDS < <(fleet_ version --json | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)["kinds"]))')
+LAST="${KINDS[${#KINDS[@]} - 1]}"
+BEFORE_LAST="${KINDS[${#KINDS[@]} - 2]}"
+
 log "tab steps to the next kind"
 send Tab
 wait_for 'defaults +' "tab did not show the TaskConfig list"
-for _ in 1 2 3 4 5; do send Tab; done
+for _ in $(seq $((${#KINDS[@]} - 1))); do send Tab; done
 wait_for 'alpha +Pending' "tab did not wrap back to Task"
 
 log "shift+tab steps back, wrapping to the last kind"
 send BTab
-wait_for 'No Listeners' "shift+tab did not wrap from Task to Listener"
+wait_for "No ${LAST}s" "shift+tab did not wrap from Task to $LAST"
 send BTab
-wait_for 'No Conversations' "shift+tab did not step back to Conversation"
+wait_for "No ${BEFORE_LAST}s" "shift+tab did not step back to $BEFORE_LAST"
 send Tab
 send Tab
 wait_for 'alpha +Pending' "tab did not come back to Task"
@@ -314,7 +328,7 @@ cat >"$FLEET_DIR/gamma.json" <<JSON
 [{"apiVersion":"fleet/v1alpha1","kind":"TaskConfig","metadata":{"name":"$LONG"},
   "spec":{"harness":"sh"}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"gamma"},
-  "spec":{"harness":"sh","configRef":{"name":"$LONG"},"host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
+  "spec":{"harness":"sh","configRef":{"name":"$LONG"},"host":"local","brief":"Go.","workspace":["file://$FLEET_DIR/work/beta"],"dispatch":true}}]
 JSON
 fleet_ apply -f "$FLEET_DIR/gamma.json" >/dev/null
 fleet_ reconcile --max-passes 10 >/dev/null
@@ -339,6 +353,66 @@ click "TaskConfig/$LONG"
 wait_for "^│ *│ TaskConfig/$LONG " "a click on gamma's TaskConfig link did not go to it"
 send BTab
 wait_for 'alpha +Pending' "shift+tab did not come back to Task"
+
+log "a Task shows what its agent is doing"
+wait_for 'NAME +PHASE +AGENT' "the Task table has no AGENT column"
+row 'beta +Briefed +working' "beta's agent is not drawn as working"
+
+log "a Question the worker asks puts its Task first, until it is answered"
+fleet_ declare beta --json '{"kind":"Question","id":"q1","text":"Ship it?"}' >/dev/null
+send R
+wait_for '\? beta +Briefed' "beta's open Question does not mark its row"
+click 'beta +Briefed'
+wait_for '^│ *│ \? q1: Ship it\?' "beta's trail does not show the Question it asks"
+fleet_ send beta --answers q1 yes >/dev/null
+send R
+wait_gone '\? beta +Briefed' "an answered Question still marks beta"
+
+log "a Task list over one run's 256 KiB is still listed"
+python3 - "$FLEET_DIR" >"$FLEET_DIR/big.json" <<'PY'
+import json, sys
+work = sys.argv[1] + "/work/beta"
+print(json.dumps([
+    {"apiVersion": "fleet/v1alpha1", "kind": "Task", "metadata": {"name": f"big-{i}"},
+     "spec": {"harness": "sh", "host": "local", "brief": f"brief-{i} " + "x" * 100000,
+              "workspace": ["file://" + work], "dispatch": False}}
+    for i in (1, 2, 3)
+]))
+PY
+fleet_ apply -f "$FLEET_DIR/big.json" >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+[ "$(fleet_ list task --json | wc -c)" -gt 262144 ] || die "fixture: the Task list fits one run"
+send R
+wait_for 'big-1 +Pending' "a Task list over 256 KiB was not listed"
+row 'beta +Briefed' "beta is missing from the long list"
+never '256 KiB' "the Lens refused a long Task list"
+
+log "a resource is read whole, not as the list trimmed it"
+click 'big-2 +Pending' 2
+wait_for 'Task/big-2 +· yaml +1–[0-9]+ of [0-9]{3,}' "big-2's YAML does not carry its whole brief"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave big-2's YAML"
+
+log "a resource deleted while read, then made again, reads again"
+click 'big-3 +Pending' 2
+wait_for 'Task/big-3 +· yaml' "a double-click on big-3 did not show its YAML"
+fleet_ delete task big-3 >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+send R
+wait_for 'NAME +PHASE' "deleting big-3 did not take the Lens back to the table"
+wait_gone 'big-3 +' "big-3 is still listed after its deletion"
+python3 - "$FLEET_DIR/big.json" >"$FLEET_DIR/big-3.json" <<'PY'
+import json, sys
+print(json.dumps([t for t in json.load(open(sys.argv[1])) if t["metadata"]["name"] == "big-3"]))
+PY
+fleet_ apply -f "$FLEET_DIR/big-3.json" >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+send R
+wait_for 'big-3 +Pending' "big-3 is not listed again"
+click 'big-3 +Pending' 2
+wait_for 'Task/big-3 +· yaml' "a double-click on the new big-3 did not show its YAML"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave big-3's YAML"
 
 log "Esc closes it"
 send Escape

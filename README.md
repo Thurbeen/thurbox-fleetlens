@@ -1,14 +1,14 @@
 # Fleet Lens
 
 A [thurbox](https://github.com/Thurbeen/thurbox) pane that browses
-[Fleet](https://github.com/Thurbeen/fleet) v2 resources: every kind Fleet
-serves, Tasks first, in one keyboard-first float.
+[Fleet](https://github.com/Thurbeen/thurbox/tree/main/docs/fleet) v3 resources:
+every kind Fleet serves, Tasks first, in one keyboard-first float.
 
-![Fleet Lens in thurbox's Doom theme: Alt+K opens it on four Tasks, the one that needs attention on top; j and k move; enter reads the shipped Task as YAML and j and G scroll it; tab steps through the kinds to the ChangeRequest it declared and shift+tab steps back; esc closes it](media/demo.gif)
+![Fleet Lens in thurbox's Doom theme: Alt+K opens it on four Tasks, the two that need a person on top, one whose session is gone and one asking a Question; j moves down to the shipped Task and its ChangeRequest link; enter reads it as YAML and j and G scroll it; tab steps through the kinds to the ChangeRequest, named by its pull request, and shift+tab steps back; esc closes it](media/demo.gif)
 
-The recording is a released thurbox (v2.76.2) and fleet (v2.3.0) with a
-throwaway HOME and a scratch Fleet store on the fake runtime, so no agent runs
-and nothing real is read. Reproduce it with `demo/record.sh`.
+The recording is thurbox and Fleet 3.1.0 with a throwaway HOME and a scratch
+Fleet store on the fake runtime, so no agent runs and nothing real is read.
+Reproduce it with `demo/record.sh`.
 
 It reads Fleet only through `fleet … --json`, and writes nothing to Fleet.
 
@@ -52,25 +52,35 @@ To copy text, hold `Shift` and drag: in most terminals that is their own
 selection. thurbox's drag-to-copy covers terminal panes only, not a plugin's
 float.
 
-A resource is the object fleet returned for the list, as YAML: the envelope
+A resource is the whole object `fleet get` returns, as YAML: the envelope
 first, then every field by name. A line wider than the Lens wraps, and goes
 on under where its value starts. It is read-only and follows each refresh.
 
-Rows that need a person (a Task whose `NeedsAttention` is True) come first,
-marked `!`. The line under the table gives the reason and message.
+Rows that need a person come first, and the header counts them:
+
+| Marker | Means | The line under the table says |
+| --- | --- | --- |
+| `!` | The Task's `NeedsAttention` condition is True | Its reason and message |
+| `?` | The worker declared a Question nobody has answered (`fleet send --answers`) | The Question's id and first line |
+
+Then open work, then what is settled (Concluded, Settled), newest first.
 
 | Task column | From |
 | --- | --- |
 | PHASE | `status.phase` |
-| COND | One glyph per condition: `●` True, `○` False, `?` Unknown |
-| SESSION | `status.session.host`, and the session's live status in thurbox, or `gone` |
+| AGENT | `status.agentState`: `working`, `attention`, `idle` or `unknown` |
+| SESSION | `status.sessionState`: `Running`, `Idle`, `Paused`, `Lost` or `Gone`, after the place when it is not `local` |
 | GEN | Brief generation / spec generation; red when they differ |
 | RESULT | `status.result.outcome` |
 | CR | Declared ChangeRequests |
 | AGE | Since creation |
 
-Every other kind gets NAME, PHASE, COND, SYNC (`✓` when the status observed
-the current generation, `±` when not) and AGE.
+A ChangeRequest also gets CHANGE: its pull request as `owner/repo#N`, or its
+merge request as `group/project!N`.
+
+Every other kind gets NAME, PHASE, COND (one glyph per condition: `●` True,
+`○` False, `?` Unknown), SYNC (`✓` when the status observed the current
+generation, `±` when not) and AGE.
 
 ### When fleet cannot answer
 
@@ -95,10 +105,12 @@ In Settings, under `fleetlens`:
 - Read-only. There are no actions yet.
 - Relations go one way: a ChangeRequest does not link back to its Task.
 - No filter or attach yet.
-- One `fleet list --json` per refresh. Past 256 KiB (about 45 Tasks today),
-  the Lens says so instead of parsing a cut answer.
-- POSIX hosts only: the run prints `date +%s` first, because the plugin VM
-  has no clock.
+- One `fleet list --json` per refresh, which a thurbox run caps at 256 KiB.
+  The host trims it with `awk` to the fields the table reads and drops long
+  strings, which leaves about 2 KiB a Task. Past the cap, the Lens says so
+  instead of parsing a cut answer.
+- POSIX hosts only, with `awk`: the run prints `date +%s` first, because the
+  plugin VM has no clock.
 
 ## Develop
 
