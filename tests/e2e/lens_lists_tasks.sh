@@ -354,6 +354,45 @@ wait_for "^│ *│ TaskConfig/$LONG " "a click on gamma's TaskConfig link did n
 send BTab
 wait_for 'alpha +Pending' "shift+tab did not come back to Task"
 
+log "a Task shows what its agent is doing"
+wait_for 'NAME +PHASE +AGENT' "the Task table has no AGENT column"
+row 'beta +Briefed +working' "beta's agent is not drawn as working"
+
+log "a Question the worker asks puts its Task first, until it is answered"
+fleet_ declare beta --json '{"kind":"Question","id":"q1","text":"Ship it?"}' >/dev/null
+send R
+wait_for '\? beta +Briefed' "beta's open Question does not mark its row"
+click 'beta +Briefed'
+wait_for '^│ *│ \? q1: Ship it\?' "beta's trail does not show the Question it asks"
+fleet_ send beta --answers q1 yes >/dev/null
+send R
+wait_gone '\? beta +Briefed' "an answered Question still marks beta"
+
+log "a Task list over one run's 256 KiB is still listed"
+python3 - "$FLEET_DIR" >"$FLEET_DIR/big.json" <<'PY'
+import json, sys
+work = sys.argv[1] + "/work/beta"
+print(json.dumps([
+    {"apiVersion": "fleet/v1alpha1", "kind": "Task", "metadata": {"name": f"big-{i}"},
+     "spec": {"harness": "sh", "host": "local", "brief": f"brief-{i} " + "x" * 100000,
+              "workspace": ["file://" + work], "dispatch": False}}
+    for i in (1, 2, 3)
+]))
+PY
+fleet_ apply -f "$FLEET_DIR/big.json" >/dev/null
+fleet_ reconcile --max-passes 10 >/dev/null
+[ "$(fleet_ list task --json | wc -c)" -gt 262144 ] || die "fixture: the Task list fits one run"
+send R
+wait_for 'big-1 +Pending' "a Task list over 256 KiB was not listed"
+row 'beta +Briefed' "beta is missing from the long list"
+never '256 KiB' "the Lens refused a long Task list"
+
+log "a resource is read whole, not as the list trimmed it"
+click 'big-2 +Pending' 2
+wait_for 'Task/big-2 +· yaml +1–[0-9]+ of [0-9]{3,}' "big-2's YAML does not carry its whole brief"
+send Escape
+wait_for 'NAME +PHASE' "Esc did not leave big-2's YAML"
+
 log "Esc closes it"
 send Escape
 wait_gone 'Fleet Lens' "Esc did not close the Lens"

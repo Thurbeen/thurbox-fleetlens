@@ -4,12 +4,13 @@
 -- under a faked snapshot in the tests as under thurbox.
 --
 -- snap = {
---   where = "local · ~/.config/fleet/config.toml", version = "2.3.0",
+--   where = "local · ~/.config/fleet/config.toml", version = "3.1.0",
 --   kinds = { { kind = "Task", count = 2 }, ... }, kind = "Task",
 --   columns = { "NAME", ... }, rows = { model rows }, selected = 1,
 --   loading = bool, stale = bool, banner = { title, detail } | nil,
 --   note = "untrusted text" | nil,
---   detail = { title = "Task/alpha", lines = { { text, first }... }, offset = 0 } | nil,
+--   detail = { title = "Task/alpha", lines = { { text, first }... }, offset = 0,
+--     loading = bool } | nil,
 --     (`lines` as `yaml.wrap` breaks them, at `M.text_width`)
 -- }
 --
@@ -23,7 +24,7 @@ local widgets = require("lib.widgets")
 
 local M = {}
 
-local RAIL = 18
+local RAIL = 20
 local NAME_MAX = 44
 
 local function tone(role)
@@ -38,6 +39,8 @@ local function tone(role)
   end
   return nil
 end
+
+local MARKER_TONE = { ["!"] = "error", ["?"] = "warning" }
 
 local function line(spans, extra)
   local node = { type = "text", len = 1, text = { spans } }
@@ -95,10 +98,19 @@ end
 local function table_body(snap, height)
   local children = {}
   local head = string.format(" %s %d", snap.kind, #snap.rows)
-  local fresh = snap.loading and "loading…" or (snap.stale and "stale" or "")
+  local fresh = snap.loading and "  loading…" or (snap.stale and "  stale" or "")
+  local waiting = 0
+  for _, row in ipairs(snap.rows) do
+    if row.marker then
+      waiting = waiting + 1
+    end
+  end
   children[#children + 1] = line({
-    { text = head, style = { fg = theme.text } },
-    { text = "  · attention first  ", style = { fg = theme.muted } },
+    { text = head, style = { fg = theme.text, bold = true } },
+    {
+      text = waiting > 0 and string.format("  · %d need you", waiting) or "",
+      style = { fg = theme.warn },
+    },
     { text = fresh, style = { fg = snap.stale and theme.bad or theme.muted } },
   })
   if snap.banner then
@@ -109,10 +121,6 @@ local function table_body(snap, height)
         style = { fg = theme.muted },
       },
     })
-  end
-  if snap.note then
-    children[#children + 1] = { type = "text", fill = 1, wrap = true, text = snap.note }
-    return { type = "box", fill = 1, children = children }
   end
   if #snap.rows == 0 then
     local empty = snap.loading and "Asking fleet…"
@@ -133,8 +141,8 @@ local function table_body(snap, height)
     local tones = snap.stale and {} or row.tones
     local spans = cells_spans(row.cells, w, tones, base)
     table.insert(spans, 1, {
-      text = row.attention and "! " or "  ",
-      style = { fg = theme.bad },
+      text = row.marker and (row.marker .. " ") or "  ",
+      style = { fg = tone(MARKER_TONE[row.marker]) },
     })
     local selected = i == snap.selected
     children[#children + 1] = line(spans, {
@@ -168,6 +176,16 @@ end
 
 local function detail_body(snap, height)
   local d = snap.detail
+  if d.loading then
+    return {
+      type = "box",
+      fill = 1,
+      children = {
+        line({ { text = " " .. d.title, style = { fg = theme.accent, bold = true } } }),
+        line({ { text = "   Asking fleet…", style = { fg = theme.muted } } }),
+      },
+    }
+  end
   local room = math.max(1, height - 1)
   local offset = math.max(0, math.min(d.offset or 0, #d.lines - room))
   local last = math.min(#d.lines, offset + room)
@@ -191,6 +209,14 @@ local function detail_body(snap, height)
     else
       children[#children + 1] = line({ { text = " " .. text, style = { fg = theme.text } } })
     end
+  end
+  return { type = "box", fill = 1, children = children }
+end
+
+local function note_body(note)
+  local children = { line({ { text = "" } }) }
+  for text in note:gmatch("[^\n]+") do
+    children[#children + 1] = line({ { text = "   " .. text, style = { fg = theme.text } } })
   end
   return { type = "box", fill = 1, children = children }
 end
@@ -220,6 +246,7 @@ local LIST_HINTS = {
   { "shift+r", "R refresh" },
   { "esc", "esc close" },
 }
+local NOTE_HINTS = { { "esc", "esc close" } }
 local DETAIL_HINTS = {
   { "j", "j/k scroll" },
   { "home", "g/G top/end" },
@@ -250,8 +277,8 @@ function M.render(ctx, snap)
   end
   local trail = { { text = " ", style = { fg = theme.muted } } }
   if sel and sel.why then
-    local why = widgets.truncate_hard("! " .. sel.why, room)
-    trail = { { text = " " .. why, style = { fg = theme.bad } } }
+    local why = widgets.truncate_hard(sel.marker .. " " .. sel.why, room)
+    trail = { { text = " " .. why, style = { fg = tone(MARKER_TONE[sel.marker]) } } }
   elseif sel then
     local name = widgets.truncate_hard(snap.kind .. "/" .. (sel.name or ""), room)
     trail = { { text = " " .. name, style = { fg = theme.muted } } }
@@ -267,14 +294,14 @@ function M.render(ctx, snap)
         style = { fg = theme.muted },
       },
     }),
-    snap.detail and detail_body(snap, height) or {
+    snap.note and note_body(snap.note) or snap.detail and detail_body(snap, height) or {
       type = "box",
       axis = "horizontal",
       fill = 1,
       children = { rail(snap), table_body(snap, height) },
     },
     line(trail),
-    footer(snap.detail and DETAIL_HINTS or LIST_HINTS),
+    footer(snap.note and NOTE_HINTS or snap.detail and DETAIL_HINTS or LIST_HINTS),
   }
   return {
     type = "box",

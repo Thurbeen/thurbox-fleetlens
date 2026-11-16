@@ -44,6 +44,99 @@ test("command passes --config when set, quoted", function()
   )
 end)
 
+test("a list asks for JSON and keeps fleet's exit status past the trim", function()
+  local cmd = source.list_command({ bin = "fleet", config = "" }, "ChangeRequest")
+  eq(cmd:find("date +%s; out=$(fleet list changerequest --json)", 1, true), 1)
+  eq(cmd:sub(-9), "; exit $s")
+end)
+
+-- A fake fleet: prints the pretty JSON in FAKE_JSON and exits FAKE_EXIT.
+local FAKE = os.getenv("FAKE_FLEET")
+
+local function list_through(json_text, exit)
+  local cmd = source.list_command({ bin = FAKE, config = "" }, "Task")
+  local pipe = assert(
+    io.popen(
+      string.format(
+        "FAKE_EXIT=%d FAKE_JSON=%s sh -c %s",
+        exit or 0,
+        source.quote(json_text),
+        source.quote(cmd)
+      )
+    )
+  )
+  local out = pipe:read("a")
+  local _, _, status = pipe:close()
+  return source.classify({ state = "done", status = status, stdout = out, stderr = "" }, "local"),
+    out
+end
+
+local PRETTY = table.concat({
+  "[",
+  "  {",
+  '    "kind": "Task",',
+  '    "metadata": {',
+  '      "labels": {',
+  '        "note": "' .. string.rep("l", 300) .. '"',
+  "      },",
+  '      "name": "a"',
+  "    },",
+  '    "spec": {',
+  '      "brief": "' .. string.rep("b", 300) .. '",',
+  '      "configRef": {',
+  '        "name": "defaults"',
+  "      },",
+  '      "workspace": [',
+  '        "file:///w"',
+  "      ]",
+  "    },",
+  '    "status": {',
+  '      "agentState": "working",',
+  '      "declared": [',
+  "        {",
+  '          "id": "q1",',
+  '          "kind": "Question",',
+  '          "text": "say \\"' .. string.rep("q", 300) .. '\\" now"',
+  "        }",
+  "      ],",
+  '      "phase": "Briefed",',
+  '      "receipts": {',
+  '        "k": {',
+  '          "at": 1',
+  "        }",
+  "      }",
+  "    }",
+  "  }",
+  "]",
+}, "\n")
+
+test("a list keeps what the table reads and drops the rest", function()
+  local c = list_through(PRETTY)
+  eq(c.kind, "ok")
+  local t = c.value[1]
+  eq(t.metadata.name, "a")
+  eq(t.spec.configRef.name, "defaults")
+  eq(t.spec.workspace, nil, "spec.workspace")
+  eq(t.status.agentState, "working")
+  eq(t.status.phase, "Briefed")
+  eq(t.status.receipts, nil, "status.receipts")
+  eq(t.status.declared[1].id, "q1")
+end)
+
+test("a list drops long strings, escaped quotes and all", function()
+  local t = list_through(PRETTY).value[1]
+  eq(t.spec.brief, "…")
+  eq(t.status.declared[1].text, "…")
+  eq(t.metadata.labels.note, "…")
+end)
+
+test("a list keeps an empty answer and fleet's failure", function()
+  eq(#list_through("[]").value, 0)
+  local c = list_through("", 4)
+  eq(c.kind, "error")
+  eq(c.title, "Store unreadable")
+end)
+
 test("quote escapes a single quote", function()
   eq(source.quote("it's"), "'it'\\''s'")
 end)
@@ -146,34 +239,74 @@ test("glyphs leave NeedsAttention to the marker", function()
   )
 end)
 
-test("attention rows come first, then newest", function()
+test("rows needing a person come first, then open work, then newest", function()
   local rows = model.rows("Task", {
     task("old", "Briefed", 1000),
+    task("done", "Concluded", 9000),
     task("new", "Briefed", 5000),
     task("stuck", "Briefed", 2000, {
       conditions = {
         { type = "NeedsAttention", status = "True", reason = "DeliveryFailed", message = "m" },
       },
     }),
-  }, 10, {})
-  eq(rows[1].name, "stuck")
+    task("asks", "Concluded", 500, { declared = { { kind = "Question", id = "q1" } } }),
+  }, 10)
+  local names = {}
+  for i, row in ipairs(rows) do
+    names[i] = row.name
+  end
+  eq(table.concat(names, ","), "stuck,asks,new,old,done")
+  eq(rows[1].marker, "!")
   eq(rows[1].why, "NeedsAttention/DeliveryFailed: m")
-  eq(rows[2].name, "new")
-  eq(rows[3].name, "old")
 end)
 
-test("task cells: session, generation, result, changes", function()
+test("an open Question marks its Task until it is answered", function()
+  local asks = task("t", "Briefed", 0, {
+    declared = {
+      { kind = "Question", id = "q1", text = "Ship it?" },
+      { kind = "Question", id = "q2", text = "And docs?" },
+    },
+    answered = { q1 = { from = "cli/x" } },
+  })
+  local row = model.rows("Task", { asks }, 0)[1]
+  eq(row.marker, "?")
+  eq(row.why, "q2: And docs?")
+  asks.status.answered.q2 = { from = "cli/x" }
+  eq(model.rows("Task", { asks }, 0)[1].marker, nil)
+end)
+
+test("NeedsAttention outranks a Question on the marker", function()
+  local row = model.rows("Task", {
+    task("t", "Briefed", 0, {
+      declared = { { kind = "Question", id = "q1", text = "?" } },
+      conditions = { { type = "NeedsAttention", status = "True", reason = "Lost" } },
+    }),
+  }, 0)[1]
+  eq(row.marker, "!")
+end)
+
+test("a Question whose text the list dropped says so", function()
+  local row = model.rows("Task", {
+    task("t", "Briefed", 0, { declared = { { kind = "Question", id = "q1", text = "…" } } }),
+  }, 0)[1]
+  eq(row.why, "q1 waits for an answer")
+end)
+
+test("task cells: agent, session, generation, result, changes", function()
   local rows = model.rows("Task", {
     task("t", "Concluded", 0, {
+      agentState = "idle",
+      sessionState = "Paused",
       session = { id = "s1", host = "local" },
       brief = { generation = 1 },
       result = { outcome = "shipped" },
       declared = { { kind = "ChangeRequest", url = "u" }, { kind = "Note" } },
     }),
-  }, 90, { s1 = "idle" })
+  }, 90)
   local c = rows[1].cells
-  eq(table.concat(model.columns("Task"), ","), "NAME,PHASE,COND,SESSION,GEN,RESULT,CR,AGE")
-  eq(c[4], "local idle")
+  eq(table.concat(model.columns("Task"), ","), "NAME,PHASE,AGENT,SESSION,GEN,RESULT,CR,AGE")
+  eq(c[3], "idle")
+  eq(c[4], "Paused")
   eq(c[5], "1/2")
   eq(rows[1].tones[5], "error", "a brief generation behind the spec")
   eq(c[6], "shipped")
@@ -181,14 +314,47 @@ test("task cells: session, generation, result, changes", function()
   eq(c[8], "1m")
 end)
 
-test("a session thurbox no longer has is gone", function()
-  local rows = model.rows(
-    "Task",
-    { task("t", "Briefed", 0, { session = { id = "x", host = "local" } }) },
-    0,
-    {}
-  )
-  eq(rows[1].cells[4], "local gone")
+test("a session on another place names it", function()
+  local rows = model.rows("Task", {
+    task("t", "Briefed", 0, {
+      agentState = "attention",
+      sessionState = "Running",
+      session = { host = "exec/nixos" },
+    }),
+  }, 0)
+  eq(rows[1].cells[3], "attention")
+  eq(rows[1].tones[3], "warning")
+  eq(rows[1].cells[4], "exec/nixos Running")
+end)
+
+test("a lost session is an error, none is a dash", function()
+  local rows = model.rows("Task", {
+    task("lost", "Briefed", 1, { sessionState = "Lost", session = { host = "local" } }),
+    task("none", "Pending", 0),
+  }, 0)
+  eq(rows[1].cells[4], "Lost")
+  eq(rows[1].tones[4], "error")
+  eq(rows[2].cells[3], "-")
+  eq(rows[2].cells[4], "-")
+end)
+
+test("a ChangeRequest names its change", function()
+  local rows = model.rows("ChangeRequest", {
+    { metadata = { name = "a", generation = 1 }, spec = { url = "https://github.com/o/r/pull/7" } },
+    {
+      metadata = { name = "b", generation = 1 },
+      spec = { url = "https://gitlab.com/g/sub/p/-/merge_requests/12" },
+    },
+    { metadata = { name = "c", generation = 1 }, spec = { url = "https://x.test/change" } },
+  }, 0)
+  eq(table.concat(model.columns("ChangeRequest"), ","), "NAME,CHANGE,PHASE,COND,SYNC,AGE")
+  local changes = {}
+  for _, row in ipairs(rows) do
+    changes[row.name] = row.cells[2]
+  end
+  eq(changes.a, "o/r#7")
+  eq(changes.b, "g/sub/p!12")
+  eq(changes.c, "https://x.test/change")
 end)
 
 test("generic kinds: sync from observedGeneration", function()

@@ -68,7 +68,7 @@ TOML
 task() {
   # A workspace that need not exist on the fake runtime, and puts no path of
   # this machine in the YAML on screen.
-  printf '{"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"%s"},"spec":{"harness":"sh","host":"local","brief":"%s","workspace":{"dir":"%s"},"dispatch":%s}}' \
+  printf '{"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"%s"},"spec":{"harness":"sh","host":"local","brief":"%s","workspace":["file://%s"],"dispatch":%s}}' \
     "$1" "$2" "/work/acme/$1" "$3"
 }
 printf '[%s,%s,%s,%s]' \
@@ -82,6 +82,7 @@ fleet_ reconcile --max-passes 10
 fleet_ declare fix-login-redirect --change-request https://git.example.invalid/acme/shop/pull/42
 fleet_ result fix-login-redirect --generation 1 --outcome shipped --summary "Opened the fix."
 fleet_ result flaky-ci --generation 1 --outcome stuck --summary "Needs a maintainer."
+fleet_ declare flaky-ci --json '{"kind":"Question","id":"q1","text":"Quarantine the flaky test?"}'
 # bump-deps's session vanishes before it answers: fleet raises NeedsAttention.
 python3 - "$FLEET_DIR/fake-host/state.json" <<'PY'
 import json, sys
@@ -108,7 +109,7 @@ src  = "git+file://$REPO"
 file = "thurbox-fleetlens/plugins/88_fleet_lens.lua"
 TOML
 # Trust the pane the way the Interface tab's `t` does (see the e2e).
-python3 - "$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua" "$CONFIG/ui.json" <<'PY'
+python3 - "$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua" "$CONFIG/plugin-state.json" <<'PY'
 import json, pathlib, sys
 pane, out = sys.argv[1], pathlib.Path(sys.argv[2])
 h = 0xCBF29CE484222325
@@ -118,23 +119,32 @@ held = json.loads(out.read_text()) if out.exists() else {}
 held.setdefault("trusted", {})[pane] = f"{h:016x}"
 out.write_text(json.dumps(held, indent=2))
 PY
+# The Lens runs a fleet that knows the store, so its header says "fleet's
+# default config" rather than a path of this machine; thurbox gets no
+# FLEET_CONFIG, or it would run its own engine on the store mid-take.
+mkdir -p "$ROOT/bin"
+printf '#!/bin/sh\nFLEET_CONFIG=%s exec %s "$@"\n' "$FLEET_DIR/fleet.toml" "$FLEET" >"$ROOT/bin/fleet"
+chmod +x "$ROOT/bin/fleet"
+python3 - "$CONFIG/ui.json" "$ROOT/bin/fleet" <<'PY'
+import json, pathlib, sys
+out = pathlib.Path(sys.argv[1])
+held = json.loads(out.read_text()) if out.exists() else {}
+held.setdefault("settings", {})["fleetlens.bin"] = sys.argv[2]
+out.write_text(json.dumps(held, indent=2))
+PY
 # No release badge or update prompt mid-take.
 printf '[features]\nversion_check = false\nauto_update = false\nnotifications = false\n' >"$CONFIG/settings.toml"
-# The first launch asks about v2 and waits: answer it up front. The theme goes
-# in the row the theme picker writes: `doom`, which the sibling plugins' demos
-# are recorded in. THEME=<name> picks another.
-"$THURBOX_CLI" session list --json >/dev/null
-python3 - "$XDG_DATA_HOME/thurbox/thurbox.db" "${THEME:-doom}" <<'PY'
-import sqlite3, sys
-with sqlite3.connect(sys.argv[1]) as db:
-    for key, value in (("v2_interface_acknowledged", "1"), ("active_theme", sys.argv[2])):
-        db.execute("INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)", (key, value))
-PY
+# thurbox sets Fleet up on its first launch and names the config's path; one
+# made up front leaves nothing to announce.
+"$FLEET" init >/dev/null
+# The theme goes where the theme picker writes it: `doom`, which the sibling
+# plugins' demos are recorded in. THEME=<name> picks another.
+printf '{"theme": "%s"}\n' "${THEME:-doom}" >"$CONFIG/interface.json"
 
 cat >"$ROOT/run.sh" <<RUN
 #!/usr/bin/env bash
 export TERM=xterm-256color COLORTERM=truecolor SHELL=/bin/sh PS1='\$ '
-export PATH="$(dirname "$FLEET"):\$PATH" FLEET_CONFIG="$FLEET_DIR/fleet.toml"
+export PATH="$(dirname "$FLEET"):\$PATH"
 cd "$HOME"
 exec "$THURBOX"
 RUN
@@ -163,15 +173,16 @@ wait_for '.'
 sleep 2
 snap 0-start
 
-# Open it: Tasks first, the one that needs a person on top.
+# Open it: Tasks first, the ones that need a person on top.
 k M-k 0.2
 wait_for 'bump-deps'
 sleep 2.5
 snap 1-open
-# Down the rows: the line under the table follows the selection.
+# Down the rows: the line under the table follows the selection, from the
+# lost session to the open Question to the shipped Task's ChangeRequest.
+k j 1.8
 k j 1.2
-k j 1.2
-k k 1.2
+k j 1.8
 snap 2-moved
 # Read the shipped Task, as YAML, and scroll it.
 k Enter 0.2

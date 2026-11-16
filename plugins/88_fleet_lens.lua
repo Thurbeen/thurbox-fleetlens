@@ -1,4 +1,4 @@
--- Fleet Lens: every Fleet v2 resource kind, browsed from one float.
+-- Fleet Lens: every Fleet resource kind, browsed from one float.
 --
 -- Alt+K opens it. It reads Fleet only through `fleet … --json`, run with the `run`
 -- capability on the machine the `machine` setting names, and draws what came
@@ -66,11 +66,11 @@ end
 local asking = false
 
 --- Ask for `key` and return its classification.
-local function ask(key, args, ttl, w)
+local function ask(key, cmd, ttl, w)
   if asking then
     local refresh = refreshing[key]
     refreshing[key] = nil
-    run(key, source.command(w, args), {
+    run(key, cmd, {
       machine = w.machine,
       ttl = ttl,
       timeout = TIMEOUT,
@@ -97,11 +97,12 @@ local function kinds(w)
       out[#out + 1] = { kind = kind }
     end
   end
-  local _, version = ask("fl:version", { "version", "--json" }, SLOW_TTL, w)
+  local _, version = ask("fl:version", source.command(w, { "version", "--json" }), SLOW_TTL, w)
   for _, kind in ipairs(version and version.value.kinds or {}) do
     add(kind)
   end
-  local _, plugins = ask("fl:plugins", { "list", "plugins", "--json" }, SLOW_TTL, w)
+  local _, plugins =
+    ask("fl:plugins", source.command(w, { "list", "plugins", "--json" }), SLOW_TTL, w)
   for _, plugin in ipairs(plugins and plugins.value or {}) do
     for _, kind in ipairs(plugin.kinds or {}) do
       add(kind)
@@ -113,14 +114,6 @@ local function kinds(w)
   return out, version and version.value.version or nil
 end
 
-local function sessions()
-  local by_id = {}
-  for _, s in ipairs((thurbox and thurbox.sessions) or {}) do
-    by_id[s.id] = s.status
-  end
-  return by_id
-end
-
 local function untrusted(ctx)
   return view.render(ctx, {
     where = "not trusted",
@@ -129,9 +122,27 @@ local function untrusted(ctx)
     columns = {},
     rows = {},
     selected = 1,
-    note = "  Fleet Lens runs `fleet` and needs your trust first.\n\n"
-      .. "  Settings (Ctrl+,) → ] → select 88_fleet_lens.lua → t",
+    note = "Fleet Lens runs `fleet`, so it needs your trust first.\n"
+      .. "Settings (Ctrl+,) → ] → select thurbox-fleetlens/plugins/88_fleet_lens.lua → t",
   })
+end
+
+--- The resource being read, whole, from `fleet get`: the list holds it trimmed.
+local function read(ctx, w, kind, name)
+  local title = kind .. "/" .. name
+  local answer, held =
+    ask("fl:get:" .. title, source.command(w, { "get", kind:lower(), name }), LIST_TTL, w)
+  if answer.gone then
+    return { gone = true }
+  end
+  local banner = answer.kind == "error" and answer or nil
+  if not held then
+    return { title = title, loading = true, lines = {}, offset = 0, banner = banner }
+  end
+  local lines = yaml.wrap(yaml.lines(held.value), view.text_width(ctx))
+  detail_max = math.max(0, #lines - view.room(ctx))
+  detail.offset = math.min(detail.offset, detail_max)
+  return { title = title, lines = lines, offset = detail.offset, banner = banner }
 end
 
 local function render(ctx)
@@ -146,8 +157,8 @@ local function render(ctx)
   local list, version = kinds(w)
   drawn_kinds = list
   local kind = state.kind or "Task"
-  local now_answer, last = ask("fl:list:" .. kind, { "list", kind:lower(), "--json" }, LIST_TTL, w)
-  local rows = last and model.rows(kind, last.value, last.now, sessions()) or {}
+  local now_answer, last = ask("fl:list:" .. kind, source.list_command(w, kind), LIST_TTL, w)
+  local rows = last and model.rows(kind, last.value, last.now) or {}
   if wanted and (wanted.kind ~= kind or last) then
     for i, row in ipairs(wanted.kind == kind and rows or {}) do
       if row.name == wanted.name then
@@ -172,16 +183,13 @@ local function render(ctx)
     for i, row in ipairs(rows) do
       if row.name == detail.name then
         selected = i
-        local lines = yaml.wrap(yaml.lines(row.object), view.text_width(ctx))
-        detail_max = math.max(0, #lines - view.room(ctx))
-        detail.offset = math.min(detail.offset, detail_max)
-        shown = { title = kind .. "/" .. row.name, lines = lines, offset = detail.offset }
+        shown = read(ctx, w, kind, row.name)
+        banner = banner or shown.banner
       end
     end
-    -- Gone from the list (deleted, or the kind changed under it): back to the
-    -- table, so the keys move rows again.
-    if not shown then
+    if not shown or shown.gone then
       detail = nil
+      shown = nil
     end
   end
   return view.render(ctx, {
@@ -193,7 +201,7 @@ local function render(ctx)
     rows = rows,
     selected = selected,
     loading = now_answer.kind == "pending" and not last,
-    stale = banner ~= nil and last ~= nil,
+    stale = now_answer.kind == "error" and last ~= nil,
     banner = banner,
     detail = shown,
   })
@@ -228,7 +236,7 @@ local function open_detail()
   if not held then
     return
   end
-  local rows = model.rows(kind, held.value, held.now, {})
+  local rows = model.rows(kind, held.value, held.now)
   local row = rows[math.max(1, math.min(selection[kind] or 1, #rows))]
   if row then
     detail = { name = row.name, offset = 0 }
@@ -269,7 +277,11 @@ local function close()
 end
 
 local function refresh()
-  refreshing["fl:list:" .. (state.kind or "Task")] = true
+  local kind = state.kind or "Task"
+  refreshing["fl:list:" .. kind] = true
+  if detail then
+    refreshing["fl:get:" .. kind .. "/" .. detail.name] = true
+  end
   refreshing["fl:version"] = true
   refreshing["fl:plugins"] = true
 end
