@@ -126,9 +126,9 @@ cat >"$FLEET_DIR/tasks.json" <<JSON
 [{"apiVersion":"fleet/v1alpha1","kind":"TaskConfig","metadata":{"name":"defaults"},
   "spec":{"harness":"sh"}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"alpha"},
-  "spec":{"harness":"sh","configRef":{"name":"defaults"},"host":"local","brief":"Wait for the release branch to be cut, then check every service in the monorepo still builds against it, list the ones that do not, and open one issue per failing service with the build log attached so the owners can pick them up tomorrow morning before standup end-of-brief.","workspace":{"dir":"$FLEET_DIR/work/alpha"},"dispatch":false}},
+  "spec":{"harness":"sh","configRef":{"name":"defaults"},"host":"local","brief":"Wait for the release branch to be cut, then check every service in the monorepo still builds against it, list the ones that do not, and open one issue per failing service with the build log attached so the owners can pick them up tomorrow morning before standup end-of-brief.","workspace":["file://$FLEET_DIR/work/alpha"],"dispatch":false}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"beta"},
-  "spec":{"harness":"sh","host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
+  "spec":{"harness":"sh","host":"local","brief":"Go.","workspace":["file://$FLEET_DIR/work/beta"],"dispatch":true}}]
 JSON
 fleet_() { "$FLEET" --config "$FLEET_DIR/fleet.toml" "$@"; }
 fleet_ apply -f "$FLEET_DIR/tasks.json" >/dev/null
@@ -156,11 +156,12 @@ file = "thurbox-fleetlens/plugins/88_fleet_lens.lua"
 TOML
 
 # `run` is absent until the file is trusted. There is no `plugin trust`, so this
-# writes the record the Interface tab's `t` writes: the absolute path against an
-# FNV-1a digest of the file (`kernel::bundled::digest`).
+# writes the record the Interface tab's `t` writes into plugin-state.json: the
+# absolute path against an FNV-1a digest of the file (`kernel::bundled::digest`).
+# The file is not synced, so no lock covers it and a bare digest is its grant.
 PANE="$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua"
 if [ -f "$PANE" ]; then
-  python3 - "$PANE" "$CONFIG/ui.json" <<'PY'
+  python3 - "$PANE" "$CONFIG/plugin-state.json" <<'PY'
 import json, pathlib, sys
 pane, out = sys.argv[1], pathlib.Path(sys.argv[2])
 h = 0xCBF29CE484222325
@@ -172,15 +173,22 @@ out.write_text(json.dumps(held, indent=2))
 PY
 fi
 
-# The Lens reads FLEET_CONFIG through fleet's own resolution when its config
-# setting is empty, and finds `fleet` on PATH.
-export FLEET_CONFIG="$FLEET_DIR/fleet.toml"
+# The Lens finds the store through its `config` setting and `fleet` on PATH.
+# thurbox itself gets no FLEET_CONFIG: from 3.x it would run its own engine on
+# the store, which holds the lease this test's `reconcile` needs.
+python3 - "$CONFIG/ui.json" "$FLEET_DIR/fleet.toml" <<'PY'
+import json, pathlib, sys
+out = pathlib.Path(sys.argv[1])
+held = json.loads(out.read_text()) if out.exists() else {}
+held.setdefault("settings", {})["fleetlens.config"] = sys.argv[2]
+out.write_text(json.dumps(held, indent=2))
+PY
 export PATH="$(dirname "$FLEET"):$PATH"
 
 # ── the scenario ────────────────────────────────────────────────────────────
 log "launching thurbox (${COLS}x${ROWS})"
 tmux -L "$SOCKET" new-session -d -s lens -x "$COLS" -y "$ROWS" \
-  "env PATH='$PATH' FLEET_CONFIG='$FLEET_CONFIG' '$THURBOX'"
+  "env PATH='$PATH' '$THURBOX'"
 wait_for '.' "thurbox drew nothing" 100
 sleep 1
 
@@ -206,17 +214,23 @@ wait_for "^│ *│ Task/$other " "j did not move the selection from $first to $
 send k
 wait_for "^│ *│ Task/$first " "k did not move the selection back to $first"
 
+# The rail is the kinds fleet serves, in its order; the test reads them rather
+# than assuming a release's list.
+mapfile -t KINDS < <(fleet_ version --json | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)["kinds"]))')
+LAST="${KINDS[${#KINDS[@]} - 1]}"
+BEFORE_LAST="${KINDS[${#KINDS[@]} - 2]}"
+
 log "tab steps to the next kind"
 send Tab
 wait_for 'defaults +' "tab did not show the TaskConfig list"
-for _ in 1 2 3 4 5; do send Tab; done
+for _ in $(seq $((${#KINDS[@]} - 1))); do send Tab; done
 wait_for 'alpha +Pending' "tab did not wrap back to Task"
 
 log "shift+tab steps back, wrapping to the last kind"
 send BTab
-wait_for 'No Listeners' "shift+tab did not wrap from Task to Listener"
+wait_for "No ${LAST}s" "shift+tab did not wrap from Task to $LAST"
 send BTab
-wait_for 'No Conversations' "shift+tab did not step back to Conversation"
+wait_for "No ${BEFORE_LAST}s" "shift+tab did not step back to $BEFORE_LAST"
 send Tab
 send Tab
 wait_for 'alpha +Pending' "tab did not come back to Task"
@@ -314,7 +328,7 @@ cat >"$FLEET_DIR/gamma.json" <<JSON
 [{"apiVersion":"fleet/v1alpha1","kind":"TaskConfig","metadata":{"name":"$LONG"},
   "spec":{"harness":"sh"}},
  {"apiVersion":"fleet/v1alpha1","kind":"Task","metadata":{"name":"gamma"},
-  "spec":{"harness":"sh","configRef":{"name":"$LONG"},"host":"local","brief":"Go.","workspace":{"dir":"$FLEET_DIR/work/beta"},"dispatch":true}}]
+  "spec":{"harness":"sh","configRef":{"name":"$LONG"},"host":"local","brief":"Go.","workspace":["file://$FLEET_DIR/work/beta"],"dispatch":true}}]
 JSON
 fleet_ apply -f "$FLEET_DIR/gamma.json" >/dev/null
 fleet_ reconcile --max-passes 10 >/dev/null
