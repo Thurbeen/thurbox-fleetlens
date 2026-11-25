@@ -4,7 +4,7 @@
 # store on the fake runtime, so no agent runs and nothing real is read.
 #
 # asciinema records the pty and agg rasterises the cast, as the sibling
-# plugins' demos do. tmux presses the keys, so what lands in the cast is the
+# mods' demos do. tmux presses the keys, so what lands in the cast is the
 # pane reacting to real keys.
 #
 # Needs: asciinema, agg, tmux, python3, and thurbox, thurbox-cli and fleet on
@@ -96,20 +96,20 @@ PY
 fleet_ reconcile --max-passes 10
 
 # ── a scratch interface with the working copy in it ─────────────────────────
-UI_DIR="$("$THURBOX_CLI" plugin dir | sed -n 's/^dir: //p')"
+UI_DIR="$("$THURBOX_CLI" mod dir | sed -n 's/^dir: //p')"
 case "$UI_DIR" in "$ROOT"/*) ;; *) echo "interface '$UI_DIR' is outside the sandbox" >&2; exit 1 ;; esac
-"$THURBOX_CLI" plugin new seed >/dev/null
-rm -f "$UI_DIR"/plugins/*_seed.lua
+"$THURBOX_CLI" mod new seed >/dev/null
+rm -f "$UI_DIR"/mods/*_seed.lua
 CONFIG="$(dirname "$UI_DIR")"
 ln -sfn "$REPO" "$UI_DIR/thurbox-fleetlens"
-cat >>"$UI_DIR/plugins.toml" <<TOML
+cat >>"$UI_DIR/mods.toml" <<TOML
 
-[[plugin]]
+[[mod]]
 src  = "git+file://$REPO"
 file = "thurbox-fleetlens/plugins/88_fleet_lens.lua"
 TOML
 # Trust the pane the way the Interface tab's `t` does (see the e2e).
-python3 - "$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua" "$CONFIG/plugin-state.json" <<'PY'
+python3 - "$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua" "$CONFIG/mod-state.json" <<'PY'
 import json, pathlib, sys
 pane, out = sys.argv[1], pathlib.Path(sys.argv[2])
 h = 0xCBF29CE484222325
@@ -138,7 +138,7 @@ printf '[features]\nversion_check = false\nauto_update = false\nnotifications = 
 # made up front leaves nothing to announce.
 "$FLEET" init >/dev/null
 # The theme goes where the theme picker writes it: `doom`, which the sibling
-# plugins' demos are recorded in. THEME=<name> picks another.
+# mods' demos are recorded in. THEME=<name> picks another.
 printf '{"theme": "%s"}\n' "${THEME:-doom}" >"$CONFIG/interface.json"
 
 cat >"$ROOT/run.sh" <<RUN

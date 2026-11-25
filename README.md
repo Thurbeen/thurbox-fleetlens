@@ -15,15 +15,15 @@ It reads Fleet only through `fleet … --json`, and writes nothing to Fleet.
 ## Install
 
 ```sh
-thurbox-cli plugin install git+https://github.com/Thurbeen/thurbox-fleetlens
-thurbox-cli plugin check
+thurbox-cli mod install git+https://github.com/Thurbeen/thurbox-fleetlens
+thurbox-cli mod check
 ```
 
 Then trust it, because it runs `fleet`: Settings (`Ctrl+,`) → `]` → select
 `thurbox-fleetlens/plugins/88_fleet_lens.lua` → `t`. Until then, Alt+K opens the
 pane and it tells you this.
 
-`thurbox-cli plugin update` fetches a newer version. A changed file of an
+`thurbox-cli mod update` fetches a newer version. A changed file of an
 installed pane needs trust again; that is thurbox's rule for a pane that runs
 commands.
 
@@ -49,7 +49,7 @@ EnvProviders. Click one to go to it; clicked while reading a resource, it
 reads the linked one.
 
 To copy text, hold `Shift` and drag: in most terminals that is their own
-selection. thurbox's drag-to-copy covers terminal panes only, not a plugin's
+selection. thurbox's drag-to-copy covers terminal panes only, not a mod's
 float.
 
 A resource is the whole object `fleet get` returns, as YAML: the envelope
@@ -110,12 +110,12 @@ In Settings, under `fleetlens`:
   strings, which leaves about 2 KiB a Task. Past the cap, the Lens says so
   instead of parsing a cut answer.
 - POSIX hosts only, with `awk`: the run prints `date +%s` first, because the
-  plugin VM has no clock.
+  mod VM has no clock.
 
 ## Develop
 
 ```sh
-selene . && stylua --check .     # lint, against thurbox's plugin sandbox (thurbox.yml)
+selene . && stylua --check .     # lint, against thurbox's mod sandbox (thurbox.yml)
 tests/run.sh                     # the pure modules, Lua 5.4
 tests/e2e/lens_lists_tasks.sh    # real thurbox + real fleet in tmux, sandboxed HOME
 demo/record.sh                   # re-record media/demo.gif
