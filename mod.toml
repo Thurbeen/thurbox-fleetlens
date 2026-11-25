@@ -3,7 +3,7 @@
 # Several files — the pane and the modules it requires — so it is installed by
 # CLONING it:
 #
-#     thurbox-cli plugin install git+https://github.com/Thurbeen/thurbox-fleetlens
+#     thurbox-cli mod install git+https://github.com/Thurbeen/thurbox-fleetlens
 #
 # The clone lands at `<interface dir>/thurbox-fleetlens/`, which is the name the
 # pane requires its modules by (`require("thurbox-fleetlens.lib.source")`). It is a
@@ -14,5 +14,5 @@
 name = "fleet-lens"
 description = "Browse Fleet v3 resources — Tasks first — in a keyboard-first float"
 version = "v0.1.0"
-requires_thurbox = ">=3.1.0"
-pane = { source = "plugins/88_fleet_lens.lua", path = "plugins/88_fleet_lens.lua" }
+requires_thurbox = ">=3.24.0"
+pane = { source = "plugins/88_fleet_lens.lua", path = "mods/88_fleet_lens.lua" }

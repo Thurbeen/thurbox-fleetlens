@@ -140,28 +140,28 @@ fleet_ list task | grep -Eq '^beta +Briefed' || die "fixture: beta is not Briefe
 log "installing the pane into a scratch interface"
 # A session thurbox spawned carries THURBOX_CONFIG_DIR, which beats HOME: the
 # guard refuses to write anywhere but the sandbox.
-UI_DIR="$("$THURBOX_CLI" plugin dir | sed -n 's/^dir: //p')"
+UI_DIR="$("$THURBOX_CLI" mod dir | sed -n 's/^dir: //p')"
 case "$UI_DIR" in "$ROOT"/*) ;; *) die "interface '$UI_DIR' is outside the sandbox" ;; esac
-# `plugin new` materialises the stock interface; its starter is not wanted.
-"$THURBOX_CLI" plugin new seed >/dev/null
-rm -f "$UI_DIR"/plugins/*_seed.lua
-[ -d "$UI_DIR/plugins" ] || die "no interface at '$UI_DIR'"
+# `mod new` materialises the stock interface; its starter is not wanted.
+"$THURBOX_CLI" mod new seed >/dev/null
+rm -f "$UI_DIR"/mods/*_seed.lua
+[ -d "$UI_DIR/mods" ] || die "no interface at '$UI_DIR'"
 CONFIG="$(dirname "$UI_DIR")"
 ln -sfn "$HERE" "$UI_DIR/thurbox-fleetlens"
-cat >>"$UI_DIR/plugins.toml" <<TOML
+cat >>"$UI_DIR/mods.toml" <<TOML
 
-[[plugin]]
+[[mod]]
 src  = "git+file://$HERE"
 file = "thurbox-fleetlens/plugins/88_fleet_lens.lua"
 TOML
 
-# `run` is absent until the file is trusted. There is no `plugin trust`, so this
-# writes the record the Interface tab's `t` writes into plugin-state.json: the
+# `run` is absent until the file is trusted. There is no `mod trust`, so this
+# writes the record the Interface tab's `t` writes into mod-state.json: the
 # absolute path against an FNV-1a digest of the file (`kernel::bundled::digest`).
 # The file is not synced, so no lock covers it and a bare digest is its grant.
 PANE="$UI_DIR/thurbox-fleetlens/plugins/88_fleet_lens.lua"
 if [ -f "$PANE" ]; then
-  python3 - "$PANE" "$CONFIG/plugin-state.json" <<'PY'
+  python3 - "$PANE" "$CONFIG/mod-state.json" <<'PY'
 import json, pathlib, sys
 pane, out = sys.argv[1], pathlib.Path(sys.argv[2])
 h = 0xCBF29CE484222325

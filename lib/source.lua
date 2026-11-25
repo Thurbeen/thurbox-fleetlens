@@ -42,7 +42,7 @@ end
 
 --- The shell command for one fleet call.
 ---
---- `date +%s` comes first because the plugin VM has no clock, and an age needs
+--- `date +%s` comes first because the mod VM has no clock, and an age needs
 --- one. `exec` hands the exit status to fleet, which is the status classified.
 ---@param settings { bin: string, config: string }
 ---@param args string[]

@@ -17,7 +17,7 @@ Fleet Lens is a thurbox interface pane (Lua) that reads Fleet through
   drawn stale, under a banner. Only an exit-0 `[]` draws "No <kind>s".
 - `lib/source.lua` and `lib/model.lua` are pure: no `run`, `thurbox`,
   `state` or `store`. Their behaviour is unit tested in `tests/unit.lua`.
-- The plugin VM has no `os`, `io` or clock. `selene .` checks the sandbox
+- The mod VM has no `os`, `io` or clock. `selene .` checks the sandbox
   against the vendored `thurbox.yml`, which must match CI's `THURBOX_TAG`.
 
 ## Tests

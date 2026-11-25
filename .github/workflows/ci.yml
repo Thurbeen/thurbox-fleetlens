@@ -1,4 +1,4 @@
-# What CI proves: the Lua is sound and stays inside the plugin sandbox, the pure
+# What CI proves: the Lua is sound and stays inside the mod sandbox, the pure
 # modules behave, and the pane works end to end against a real thurbox and a
 # real fleet.
 name: CI
@@ -14,7 +14,7 @@ permissions:
 # The release the pane is tested against. The vendored thurbox.yml must match
 # THURBOX_TAG; its release ships both thurbox and fleet.
 env:
-  THURBOX_TAG: v3.1.0
+  THURBOX_TAG: v3.24.0
 
 jobs:
   lint:
