@@ -7,7 +7,7 @@
 --
 -- A row is { name, marker, why, created, cells = { string... },
 -- tones = { role|nil... }, related = { { kind, name }... } }, where a tone
--- names a theme role for that cell.
+-- names the thurbox theme role (`thurbox.theme.roles`) that colours the cell.
 
 local M = {}
 
@@ -83,16 +83,28 @@ local SETTLED = { Concluded = true, Settled = true }
 
 local function phase_tone(phase)
   if SETTLED[phase] then
-    return "success"
+    return "status_done"
   elseif phase == "Stalled" then
-    return "error"
+    return "status_error"
+  elseif phase == "Pending" then
+    return "text_muted"
   end
   return nil
 end
 
-local AGENT_TONE = { attention = "warning", idle = "muted", unknown = "muted" }
-local SESSION_TONE = { Lost = "error", Gone = "error", Paused = "muted", Idle = "muted" }
-local RESULT_TONE = { shipped = "success", stuck = "warning", failed = "error" }
+local AGENT_TONE = {
+  working = "status_working",
+  attention = "status_blocked",
+  idle = "status_idle",
+  unknown = "status_unknown",
+}
+local SESSION_TONE = {
+  Idle = "status_idle",
+  Paused = "text_muted",
+  Lost = "status_error",
+  Gone = "status_error",
+}
+local RESULT_TONE = { shipped = "status_done", stuck = "status_blocked", failed = "status_error" }
 
 local function observed(obj)
   local status = obj.status or {}
@@ -162,7 +174,7 @@ local function task_cells(obj)
   return { agent, session, gen, outcome, crs > 0 and tostring(crs) or "-" }, {
     AGENT_TONE[agent],
     session_tone,
-    gen ~= "-" and status.brief.generation ~= meta.generation and "error" or nil,
+    gen ~= "-" and status.brief.generation ~= meta.generation and "danger" or nil,
     RESULT_TONE[outcome],
     nil,
   }
@@ -223,7 +235,7 @@ function M.rows(kind, objects, now)
     if meta.deletionTimestamp then
       name = "✕ " .. name
     end
-    local cells, tones = { name }, { marker == "!" and "error" or nil }
+    local cells, tones = { name }, { marker == "!" and "danger" or nil }
     local function add(cell, tone)
       cells[#cells + 1] = cell
       tones[#cells] = tone
@@ -240,7 +252,7 @@ function M.rows(kind, objects, now)
     else
       add(M.glyphs(status.conditions))
       local seen, gen = observed(obj)
-      add(seen == gen and "✓" or "±", seen ~= gen and "warning" or nil)
+      add(seen == gen and "✓" or "±", seen ~= gen and "status_working" or nil)
     end
     add(M.age(now and (now - math.floor(created / 1000)) or nil))
     rows[#rows + 1] = {

@@ -239,11 +239,23 @@ send Tab
 send Tab
 wait_for 'alpha +Pending' "tab did not come back to Task"
 
+log "a digit jumps to that kind, and h and l step through them"
+send 2
+wait_for '▸ TaskConfig' "2 did not jump to the second kind"
+wait_for 'Fleet Lens · TaskConfig' "the title does not name the kind shown"
+send l
+wait_for '▸ EnvProvider' "l did not step to the next kind"
+send h
+send h
+wait_for 'alpha +Pending' "h did not step back to Task"
+
 log "the mouse: a kind, a row, the wheel, a footer hint"
 click 'TaskConfig'
-wait_for 'defaults +' "a click on TaskConfig did not select it"
+wait_for '▸ TaskConfig' "a click on TaskConfig did not select it"
+sleep 0.5
 click 'Task +[0-9]'
-wait_for 'alpha +Pending' "a click on Task did not select it"
+wait_for '▸ Task ' "a click on Task did not select it"
+wait_for 'alpha +Pending' "a click on Task did not list the Tasks"
 click "$other +[A-Z]"
 wait_for "^│ *│ Task/$other " "a click on row $other did not select it"
 wheel "$other +[A-Z]" 64
@@ -364,9 +376,12 @@ wait_for 'NAME +PHASE +AGENT' "the Task table has no AGENT column"
 row 'beta +Briefed +working' "beta's agent is not drawn as working"
 
 log "a Question the worker asks puts its Task first, until it is answered"
+click 'alpha +Pending'
+wait_for '^│ *│ Task/alpha ' "a click on alpha did not select it"
 fleet_ declare beta --json '{"kind":"Question","id":"q1","text":"Ship it?"}' >/dev/null
 send R
 wait_for '\? beta +Briefed' "beta's open Question does not mark its row"
+row '^│ *│ Task/alpha ' "the selection left alpha when beta moved above it"
 click 'beta +Briefed'
 wait_for '^│ *│ \? q1: Ship it\?' "beta's trail does not show the Question it asks"
 fleet_ send beta --answers q1 yes >/dev/null

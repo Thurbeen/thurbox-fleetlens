@@ -350,7 +350,9 @@ test("task cells: agent, session, generation, result, changes", function()
   eq(c[3], "idle")
   eq(c[4], "Paused")
   eq(c[5], "1/2")
-  eq(rows[1].tones[5], "error", "a brief generation behind the spec")
+  eq(rows[1].tones[5], "danger", "a brief generation behind the spec")
+  eq(rows[1].tones[2], "status_done", "a settled phase")
+  eq(rows[1].tones[6], "status_done", "a shipped result")
   eq(c[6], "shipped")
   eq(c[7], "1")
   eq(c[8], "1m")
@@ -365,7 +367,7 @@ test("a session on another place names it", function()
     }),
   }, 0)
   eq(rows[1].cells[3], "attention")
-  eq(rows[1].tones[3], "warning")
+  eq(rows[1].tones[3], "status_blocked")
   eq(rows[1].cells[4], "exec/nixos Running")
 end)
 
@@ -375,9 +377,51 @@ test("a lost session is an error, none is a dash", function()
     task("none", "Pending", 0),
   }, 0)
   eq(rows[1].cells[4], "Lost")
-  eq(rows[1].tones[4], "error")
+  eq(rows[1].tones[4], "status_error")
   eq(rows[2].cells[3], "-")
   eq(rows[2].cells[4], "-")
+end)
+
+local ROLES = {}
+for role in
+  assert(io.open(os.getenv("THURBOX_YML"))):read("a"):gmatch("thurbox%.theme%.roles%.([%w_]+):")
+do
+  ROLES[role] = true
+end
+
+test("a working agent wears thurbox's status role; a running session stays plain", function()
+  local row = model.rows("Task", {
+    task("t", "Briefed", 0, {
+      agentState = "working",
+      sessionState = "Running",
+      session = { host = "local" },
+    }),
+  }, 0)[1]
+  eq(row.tones[3], "status_working")
+  eq(row.tones[4], nil, "a running session is the normal case")
+end)
+
+test("every tone is a thurbox theme role", function()
+  local rows = model.rows("Task", {
+    task("a", "Stalled", 1, { agentState = "unknown", sessionState = "Gone", session = {} }),
+    task("b", "Pending", 0, { agentState = "idle", sessionState = "Paused", session = {} }),
+    task("c", "Concluded", 0, { result = { outcome = "stuck" } }),
+    task("d", "Concluded", 0, { result = { outcome = "failed" } }),
+  }, 0)
+  for _, kind in ipairs({ "Board", "ChangeRequest" }) do
+    for _, row in ipairs(model.rows(kind, { { metadata = { name = "x", generation = 2 } } }, 0)) do
+      rows[#rows + 1] = row
+    end
+  end
+  local checked = 0
+  for _, row in ipairs(rows) do
+    for _, role in pairs(row.tones) do
+      checked = checked + 1
+      eq(ROLES[role], true, "role " .. role)
+    end
+  end
+  eq(checked > 8, true, "tones checked")
+  eq(ROLES.status_done, true, "the roles thurbox.yml declares")
 end)
 
 test("a ChangeRequest names its change", function()
