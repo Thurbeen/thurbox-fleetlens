@@ -202,6 +202,10 @@ wait_for 'Task +2' "the rail has no 'Task  2'"
 wait_for 'alpha +Pending' "no row 'alpha … Pending'"
 row 'beta +Briefed' "no row 'beta … Briefed'"
 
+log "every kind on the rail is counted before it is selected"
+wait_for 'TaskConfig +1 ' "the rail does not count TaskConfig until it is selected"
+wait_for 'EnvProvider +0 ' "the rail does not count EnvProvider until it is selected"
+
 # One `apply` made both, a millisecond or none apart, so which is newest and
 # drawn first depends on the machine. The test reads it rather than assuming.
 log "j and k move the selection"
@@ -345,6 +349,7 @@ PY
 fleet_ reconcile --max-passes 10 >/dev/null
 send R
 wait_for '! gamma +' "gamma is not drawn as needing attention"
+wait_for 'TaskConfig +2 ' "the rail's TaskConfig count did not follow a new TaskConfig"
 click 'gamma +'
 wait_for '^│ *│ ! NeedsAttention/' "gamma's trail does not say why it needs attention"
 # The reason and the link are wider than the Lens: the reason gives way.

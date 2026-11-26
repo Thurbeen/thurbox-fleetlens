@@ -20,6 +20,7 @@ local settings = require("lib.settings")
 
 local NAME = "fleetlens"
 local LIST_TTL = 3
+local COUNT_TTL = 10
 local SLOW_TTL = 300
 local TIMEOUT = 20
 
@@ -45,6 +46,8 @@ local detail_max = 0
 -- A relation followed: its kind, the name to select once that kind's rows are
 -- held, and whether to read it, as a link clicked while reading does.
 local wanted = nil
+-- The run key counting the rail's kinds, which `R` refreshes too.
+local counts_key = nil
 
 local function setting(id, fallback)
   return settings.get(NAME, id, fallback)
@@ -114,6 +117,25 @@ local function kinds(w)
   return out, version and version.value.version or nil
 end
 
+--- Every kind's count: the selected one from its own list, the rest from one
+--- run that counts them all.
+local function count_kinds(w, list, kind, last, stale)
+  local names = {}
+  for i, k in ipairs(list) do
+    names[i] = k.kind
+  end
+  counts_key = "fl:counts:" .. table.concat(names, ",")
+  local _, held = ask(counts_key, source.count_command(w, names), COUNT_TTL, w)
+  local counts = held and source.counts(held.value, names) or {}
+  for _, k in ipairs(list) do
+    if k.kind == kind then
+      k.count = stale and "?" or (last and #last.value or nil)
+    else
+      k.count = counts[k.kind]
+    end
+  end
+end
+
 local function untrusted(ctx)
   return view.render(ctx, {
     where = "not trusted",
@@ -178,10 +200,7 @@ local function render(ctx)
     end
     wanted = nil
   end
-  for _, k in ipairs(list) do
-    local held = good["fl:list:" .. k.kind]
-    k.count = held and #held.value or nil
-  end
+  count_kinds(w, list, kind, last, now_answer.kind == "error")
   local selected = math.max(1, math.min(selection[kind] or 1, #rows))
   local banner = now_answer.kind == "error" and now_answer or nil
   drawn_names = {}
@@ -290,6 +309,9 @@ local function refresh()
   refreshing["fl:list:" .. kind] = true
   if detail then
     refreshing[get_key(kind, detail.name)] = true
+  end
+  if counts_key then
+    refreshing[counts_key] = true
   end
   refreshing["fl:version"] = true
   refreshing["fl:plugins"] = true

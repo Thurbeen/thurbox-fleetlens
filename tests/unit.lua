@@ -137,6 +137,48 @@ test("a list keeps an empty answer and fleet's failure", function()
   eq(c.title, "Store unreadable")
 end)
 
+local function count_through(json_text, exit, kinds)
+  local cmd = source.count_command({ bin = FAKE, config = "" }, kinds)
+  local pipe = assert(
+    io.popen(
+      string.format(
+        "FAKE_EXIT=%d FAKE_JSON=%s sh -c %s",
+        exit or 0,
+        source.quote(json_text),
+        source.quote(cmd)
+      )
+    )
+  )
+  local out = pipe:read("a")
+  local _, _, status = pipe:close()
+  local got =
+    source.classify({ state = "done", status = status, stdout = out, stderr = "" }, "local")
+  return got.kind == "ok" and source.counts(got.value, kinds) or got
+end
+
+local TWO = '[\n  {\n    "a": [\n      {\n        "b": 1\n      }\n    ]\n  },\n  {}\n]'
+
+test("one run counts every kind, top-level objects only", function()
+  local counts = count_through(TWO, 0, { "Task", "TaskConfig" })
+  eq(counts.Task, 2)
+  eq(counts.TaskConfig, 2)
+end)
+
+test("an empty list counts zero", function()
+  eq(count_through("[]", 0, { "Board" }).Board, 0)
+end)
+
+test("a kind fleet cannot list is not counted, never zero", function()
+  local counts = count_through("", 4, { "Task", "Board" })
+  eq(counts.Task, "?")
+  eq(counts.Board, "?")
+end)
+
+test("counts of an unreadable answer are all unknown", function()
+  eq(source.counts({ 1 }, { "Task", "Board" }).Board, "?")
+  eq(source.counts("x", { "Task" }).Task, "?")
+end)
+
 test("quote escapes a single quote", function()
   eq(source.quote("it's"), "'it'\\''s'")
 end)
