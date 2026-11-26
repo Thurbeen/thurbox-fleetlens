@@ -45,15 +45,13 @@ local drawn_names = {}
 local detail = nil
 -- How far the last resource drawn could scroll, which bounds `j`.
 local detail_max = 0
--- How many rows or lines the last render showed, which is one PgDn.
-local page = 10
+local rows_per_page = 10
 -- A relation followed: its kind, the name to select once that kind's rows are
 -- held, whether to read it, as a link clicked while reading does, and the host
 -- clock of the list held when it was clicked: only a later list can say the
 -- name is not there.
 local wanted = nil
--- The run key counting the rail's kinds, which `R` refreshes too.
-local counts_key = nil
+local rail_counts_key = nil
 
 local function setting(id, fallback)
   return settings.get(NAME, id, fallback)
@@ -123,15 +121,13 @@ local function kinds(w)
   return out, version and version.value.version or nil
 end
 
---- Every kind's count: the selected one from its own list, the rest from one
---- run that counts them all.
 local function count_kinds(w, list, kind, last, stale)
   local names = {}
   for i, k in ipairs(list) do
     names[i] = k.kind
   end
-  counts_key = "fl:counts:" .. table.concat(names, ",")
-  local _, held = ask(counts_key, source.count_command(w, names), COUNT_TTL, w)
+  rail_counts_key = "fl:counts:" .. table.concat(names, ",")
+  local _, held = ask(rail_counts_key, source.count_command(w, names), COUNT_TTL, w)
   local counts = held and source.counts(held.value, names) or {}
   for _, k in ipairs(list) do
     if k.kind == kind then
@@ -253,7 +249,7 @@ local function render(ctx)
       detail = nil
     end
   end
-  page = detail and view.room(ctx) or view.rows_room(ctx)
+  rows_per_page = detail and view.room(ctx) or view.rows_room(ctx)
   return view.render(ctx, {
     where = w.machine .. " · " .. (w.config ~= "" and w.config or "fleet's default config"),
     version = version,
@@ -296,7 +292,6 @@ local function step_kind(step)
   end
 end
 
---- Select the `n`th kind on the rail.
 local function nth_kind(n)
   local k = drawn_kinds[n]
   if k and not detail then
@@ -364,8 +359,8 @@ local function refresh()
   if detail then
     refreshing[get_key(kind, detail.name)] = true
   end
-  if counts_key then
-    refreshing[counts_key] = true
+  if rail_counts_key then
+    refreshing[rail_counts_key] = true
   end
   refreshing["fl:version"] = true
   refreshing["fl:plugins"] = true
@@ -379,10 +374,10 @@ local ACTIONS = {
     move(-1)
   end,
   ["fleetlens.page_down"] = function()
-    move(page)
+    move(rows_per_page)
   end,
   ["fleetlens.page_up"] = function()
-    move(-page)
+    move(-rows_per_page)
   end,
   ["fleetlens.first"] = function()
     move(-math.huge)
