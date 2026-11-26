@@ -114,6 +114,44 @@ function M.list_command(settings, kind)
     .. "; exit $s"
 end
 
+local COUNT_TOP_LEVEL = "/^  [{]/ { n++ } END { print n + 0 }"
+
+--- The shell command counting every kind in one run, for the rail. It answers
+--- a JSON array of counts in the order of `kinds`, with -1 for a kind fleet
+--- could not list; only the clock and the counts cross back, however long the
+--- lists are.
+---@param settings { bin: string, config: string }
+---@param kinds string[]
+---@return string
+function M.count_command(settings, kinds)
+  local words = {}
+  for i, kind in ipairs(kinds) do
+    words[i] = M.quote(kind:lower())
+  end
+  return "date +%s; sep=; printf '['; for k in "
+    .. table.concat(words, " ")
+    .. "; do if out=$("
+    .. fleet_words(settings, { "list" })
+    .. ' "$k" --json 2>/dev/null); then n=$(printf \'%s\\n\' "$out" | awk '
+    .. M.quote(COUNT_TOP_LEVEL)
+    .. "); else n=-1; fi; printf '%s%s' \"$sep\" \"$n\"; sep=,; done; echo ']'"
+end
+
+--- The rail's counts by kind from a `count_command` answer: a number, or "?"
+--- where fleet could not tell.
+---@param value any
+---@param kinds string[]
+---@return table<string, integer|string>
+function M.counts(value, kinds)
+  local readable = type(value) == "table" and #value == #kinds
+  local out = {}
+  for i, kind in ipairs(kinds) do
+    local n = readable and value[i] or nil
+    out[kind] = type(n) == "number" and n >= 0 and n or "?"
+  end
+  return out
+end
+
 --- The first stderr line fleet wrote, without its `error: ` prefix.
 local function reason(stderr)
   local line = (stderr or ""):match("([^\n]+)") or ""

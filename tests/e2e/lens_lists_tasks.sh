@@ -202,6 +202,10 @@ wait_for 'Task +2' "the rail has no 'Task  2'"
 wait_for 'alpha +Pending' "no row 'alpha … Pending'"
 row 'beta +Briefed' "no row 'beta … Briefed'"
 
+log "every kind on the rail is counted before it is selected"
+wait_for 'TaskConfig +1 ' "the rail does not count TaskConfig until it is selected"
+wait_for 'EnvProvider +0 ' "the rail does not count EnvProvider until it is selected"
+
 # One `apply` made both, a millisecond or none apart, so which is newest and
 # drawn first depends on the machine. The test reads it rather than assuming.
 log "j and k move the selection"
@@ -235,11 +239,23 @@ send Tab
 send Tab
 wait_for 'alpha +Pending' "tab did not come back to Task"
 
+log "a digit jumps to that kind, and h and l step through them"
+send 2
+wait_for '▸ TaskConfig' "2 did not jump to the second kind"
+wait_for 'Fleet Lens · TaskConfig' "the title does not name the kind shown"
+send l
+wait_for '▸ EnvProvider' "l did not step to the next kind"
+send h
+send h
+wait_for 'alpha +Pending' "h did not step back to Task"
+
 log "the mouse: a kind, a row, the wheel, a footer hint"
 click 'TaskConfig'
-wait_for 'defaults +' "a click on TaskConfig did not select it"
+wait_for '▸ TaskConfig' "a click on TaskConfig did not select it"
+sleep 0.5
 click 'Task +[0-9]'
-wait_for 'alpha +Pending' "a click on Task did not select it"
+wait_for '▸ Task ' "a click on Task did not select it"
+wait_for 'alpha +Pending' "a click on Task did not list the Tasks"
 click "$other +[A-Z]"
 wait_for "^│ *│ Task/$other " "a click on row $other did not select it"
 wheel "$other +[A-Z]" 64
@@ -345,6 +361,7 @@ PY
 fleet_ reconcile --max-passes 10 >/dev/null
 send R
 wait_for '! gamma +' "gamma is not drawn as needing attention"
+wait_for 'TaskConfig +2 ' "the rail's TaskConfig count did not follow a new TaskConfig"
 click 'gamma +'
 wait_for '^│ *│ ! NeedsAttention/' "gamma's trail does not say why it needs attention"
 # The reason and the link are wider than the Lens: the reason gives way.
@@ -359,9 +376,12 @@ wait_for 'NAME +PHASE +AGENT' "the Task table has no AGENT column"
 row 'beta +Briefed +working' "beta's agent is not drawn as working"
 
 log "a Question the worker asks puts its Task first, until it is answered"
+click 'alpha +Pending'
+wait_for '^│ *│ Task/alpha ' "a click on alpha did not select it"
 fleet_ declare beta --json '{"kind":"Question","id":"q1","text":"Ship it?"}' >/dev/null
 send R
 wait_for '\? beta +Briefed' "beta's open Question does not mark its row"
+row '^│ *│ Task/alpha ' "the selection left alpha when beta moved above it"
 click 'beta +Briefed'
 wait_for '^│ *│ \? q1: Ship it\?' "beta's trail does not show the Question it asks"
 fleet_ send beta --answers q1 yes >/dev/null

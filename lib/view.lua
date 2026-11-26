@@ -6,6 +6,7 @@
 -- snap = {
 --   where = "local · ~/.config/fleet/config.toml", version = "3.1.0",
 --   kinds = { { kind = "Task", count = 2 }, ... }, kind = "Task",
+--     (a count is a number, "?" when fleet could not tell, nil while counting)
 --   columns = { "NAME", ... }, rows = { model rows }, selected = 1,
 --   loading = bool, stale = bool, banner = { title, detail } | nil,
 --   note = "untrusted text" | nil,
@@ -20,27 +21,15 @@
 
 local theme = require("lib.theme")
 local hover = require("lib.hover")
+local ui = require("lib.ui")
 local widgets = require("lib.widgets")
 
 local M = {}
 
 local RAIL = 20
-local NAME_MAX = 44
+local NAME_MIN = 12
 
-local function tone(role)
-  if role == "success" then
-    return theme.ok
-  elseif role == "warning" then
-    return theme.warn
-  elseif role == "error" then
-    return theme.bad
-  elseif role == "muted" then
-    return theme.muted
-  end
-  return nil
-end
-
-local MARKER_TONE = { ["!"] = "error", ["?"] = "warning" }
+local MARKER_ROLE = { ["!"] = "danger", ["?"] = "status_blocked" }
 
 local function line(spans, extra)
   local node = { type = "text", len = 1, text = { spans } }
@@ -50,107 +39,29 @@ local function line(spans, extra)
   return node
 end
 
---- Column widths from the content: the widest cell, NAME capped.
-local function widths(columns, rows)
-  local w = {}
-  for i, title in ipairs(columns) do
-    w[i] = widgets.len(title)
-  end
-  for _, row in ipairs(rows) do
-    for i, cell in ipairs(row.cells) do
-      w[i] = math.max(w[i] or 0, widgets.len(cell))
-    end
-  end
-  w[1] = math.min(w[1] + 2, NAME_MAX)
-  return w
+local function selection_bar()
+  return { bg = theme.role("selection_bg"), fg = theme.role("selection_fg"), bold = true }
 end
 
-local function cells_spans(cells, w, tones, base)
-  local spans = {}
-  for i, cell in ipairs(cells) do
-    local text = widgets.pad(widgets.truncate(cell, w[i]), w[i])
-    spans[#spans + 1] = {
-      text = (i == 1 and "" or "  ") .. text,
-      style = { fg = tone(tones and tones[i]) or base },
-    }
-  end
-  return spans
+--- The float's inner width: 92 % of the screen, less its two borders.
+---@param ctx table
+---@return integer
+function M.inner_width(ctx)
+  return math.floor((ctx.width or 100) * 0.92) - 2
 end
 
-local function rail(snap)
-  local out = { line({ { text = " KINDS", style = { fg = theme.muted } } }) }
-  for _, k in ipairs(snap.kinds) do
-    local on = k.kind == snap.kind
-    local count = k.count and tostring(k.count) or ""
-    if on and snap.stale then
-      count = "?"
-    end
-    local label = (on and "▸ " or "  ") .. widgets.truncate(k.kind, RAIL - 6)
-    local gap = math.max(1, RAIL - 1 - widgets.len(label) - widgets.len(count))
-    out[#out + 1] = line({
-      { text = label .. string.rep(" ", gap), style = { fg = on and theme.accent or theme.text } },
-      { text = count, style = { fg = on and theme.accent or theme.muted } },
-    }, { id = "kind:" .. k.kind, style = on and { bg = theme.role("selection_bg") } or nil })
-  end
-  return { type = "box", len = RAIL, children = out }
+--- How many columns a resource's line may take: the inner width, less the
+--- leading space and one spare column.
+---@param ctx table
+---@return integer
+function M.text_width(ctx)
+  return math.max(20, M.inner_width(ctx) - 2)
 end
 
-local function table_body(snap, height)
-  local children = {}
-  local head = string.format(" %s %d", snap.kind, #snap.rows)
-  local fresh = snap.loading and "  loading…" or (snap.stale and "  stale" or "")
-  local waiting = 0
-  for _, row in ipairs(snap.rows) do
-    if row.marker then
-      waiting = waiting + 1
-    end
-  end
-  children[#children + 1] = line({
-    { text = head, style = { fg = theme.text, bold = true } },
-    {
-      text = waiting > 0 and string.format("  · %d need you", waiting) or "",
-      style = { fg = theme.warn },
-    },
-    { text = fresh, style = { fg = snap.stale and theme.bad or theme.muted } },
-  })
-  if snap.banner then
-    children[#children + 1] = line({
-      { text = " ! " .. snap.banner.title, style = { fg = theme.bad } },
-      {
-        text = snap.banner.detail ~= "" and (" — " .. snap.banner.detail) or "",
-        style = { fg = theme.muted },
-      },
-    })
-  end
-  if #snap.rows == 0 then
-    local empty = snap.loading and "Asking fleet…"
-      or (snap.stale and "Unknown" or ("No " .. snap.kind .. "s"))
-    children[#children + 1] = line({ { text = "   " .. empty, style = { fg = theme.muted } } })
-    return { type = "box", fill = 1, children = children }
-  end
-  local w = widths(snap.columns, snap.rows)
-  local header = cells_spans(snap.columns, w, nil, theme.muted)
-  table.insert(header, 1, { text = "  " })
-  children[#children + 1] = line(header)
-  local room = math.max(1, height - #children)
-  local first = math.max(1, math.min(snap.selected - room + 1, #snap.rows - room + 1))
-  first = math.max(1, math.min(first, snap.selected))
-  for i = first, math.min(#snap.rows, first + room - 1) do
-    local row = snap.rows[i]
-    local base = snap.stale and theme.muted or theme.text
-    local tones = snap.stale and {} or row.tones
-    local spans = cells_spans(row.cells, w, tones, base)
-    table.insert(spans, 1, {
-      text = row.marker and (row.marker .. " ") or "  ",
-      style = { fg = tone(MARKER_TONE[row.marker]) },
-    })
-    local selected = i == snap.selected
-    children[#children + 1] = line(spans, {
-      id = "row:" .. (row.name or i),
-      style = selected and { bg = theme.role("selection_bg") } or nil,
-    })
-  end
-  return { type = "box", fill = 1, children = children }
+---@param ctx table
+---@return integer
+function M.height(ctx)
+  return math.max(8, math.floor((ctx.height or 40) * 0.9) - 6)
 end
 
 --- How many lines of a resource fit under its title.
@@ -160,18 +71,193 @@ function M.room(ctx)
   return math.max(1, M.height(ctx) - 1)
 end
 
---- How many columns a resource's line may take: the float's 92 % of the
---- screen, less its two borders, the leading space and one spare column.
+--- How many table rows fit under its head and column titles.
 ---@param ctx table
 ---@return integer
-function M.text_width(ctx)
-  return math.max(20, math.floor((ctx.width or 100) * 0.92) - 4)
+function M.rows_room(ctx)
+  return math.max(1, M.height(ctx) - 2)
 end
 
----@param ctx table
----@return integer
-function M.height(ctx)
-  return math.max(8, math.floor((ctx.height or 40) * 0.9) - 6)
+--- `No Tasks`, `No Policies`, `No Classes`.
+---@param kind string
+---@return string
+function M.plural(kind)
+  if kind:match("[^aeiou]y$") then
+    return kind:sub(1, -2) .. "ies"
+  elseif kind:match("[sxz]$") or kind:match("[cs]h$") then
+    return kind .. "es"
+  end
+  return kind .. "s"
+end
+
+--- Column widths from the content; NAME gives way so the row fits `room`.
+local function widths(columns, rows, room)
+  local w = {}
+  for i, title in ipairs(columns) do
+    w[i] = widgets.len(title)
+  end
+  for _, row in ipairs(rows) do
+    for i, cell in ipairs(row.cells) do
+      w[i] = math.max(w[i] or 0, widgets.len(cell))
+    end
+  end
+  local others = 0
+  for i = 2, #w do
+    others = others + w[i] + 2
+  end
+  w[1] = math.min(w[1], math.max(NAME_MIN, room - others))
+  return w
+end
+
+local function cells_spans(cells, w, tones, base)
+  local spans = {}
+  for i, cell in ipairs(cells) do
+    local text = widgets.pad(widgets.truncate(cell, w[i]), w[i])
+    local role = tones and tones[i]
+    spans[#spans + 1] = {
+      text = (i == 1 and "" or "  ") .. text,
+      style = { fg = role and theme.role(role) or base },
+    }
+  end
+  return spans
+end
+
+local function count_text(count)
+  if count == nil then
+    return "…", theme.muted
+  elseif count == "?" then
+    return "?", theme.bad
+  end
+  return tostring(count), count == 0 and theme.muted or theme.secondary
+end
+
+local function rail(snap)
+  local out = { line({ { text = " KINDS", style = { fg = theme.muted } } }) }
+  for _, k in ipairs(snap.kinds) do
+    local on = k.kind == snap.kind
+    local count, colour = count_text(k.count)
+    local label = (on and "▸ " or "  ") .. widgets.truncate(k.kind, RAIL - 7)
+    local gap = math.max(1, RAIL - 1 - widgets.len(label) - widgets.len(count))
+    local id = "kind:" .. k.kind
+    out[#out + 1] = line({
+      { text = label .. string.rep(" ", gap), style = { fg = not on and theme.text or nil } },
+      { text = count .. " ", style = { fg = not on and colour or nil } },
+    }, {
+      id = id,
+      style = on and selection_bar() or (hover.id(id) and hover.row_style() or nil),
+    })
+  end
+  return { type = "box", len = RAIL, children = out }
+end
+
+local function separator(height)
+  local out = {}
+  for i = 1, height do
+    out[i] = line({ { text = "│", style = { fg = theme.border } } })
+  end
+  return { type = "box", len = 1, children = out }
+end
+
+local function empty_state(snap, width)
+  local title, note
+  if snap.loading then
+    title = "Asking fleet…"
+  elseif snap.stale then
+    title, note = "Unknown: fleet could not tell", "R asks again"
+  else
+    title, note = "No " .. M.plural(snap.kind), "R asks fleet again"
+  end
+  local out = {}
+  for _, spans in ipairs(ui.empty({ title = title, width = width, note = note })) do
+    out[#out + 1] = line(spans)
+  end
+  return out
+end
+
+local function head_line(snap, width, first, last)
+  local waiting = 0
+  for _, row in ipairs(snap.rows) do
+    if row.marker then
+      waiting = waiting + 1
+    end
+  end
+  local left = {
+    { text = " " .. snap.kind, style = { fg = theme.text, bold = true } },
+    { text = " " .. #snap.rows, style = { fg = theme.secondary } },
+  }
+  if waiting > 0 then
+    left[#left + 1] =
+      { text = string.format("  · %d need you", waiting), style = { fg = theme.warn } }
+  end
+  if snap.loading then
+    left[#left + 1] = { text = "  · asking fleet…", style = { fg = theme.muted } }
+  elseif snap.stale then
+    left[#left + 1] = { text = "  · stale", style = { fg = theme.bad } }
+  end
+  local right = ""
+  if first and (first > 1 or last < #snap.rows) then
+    right = string.format("%d–%d of %d ", first, last, #snap.rows)
+  end
+  local used = 0
+  for _, span in ipairs(left) do
+    used = used + widgets.len(span.text)
+  end
+  left[#left + 1] = {
+    text = string.rep(" ", math.max(1, width - used - widgets.len(right))) .. right,
+    style = { fg = theme.muted },
+  }
+  return line(left)
+end
+
+local function table_body(snap, height, width)
+  local children = {}
+  if snap.banner then
+    children[#children + 1] = line({
+      { text = " ! " .. snap.banner.title, style = { fg = theme.bad, bold = true } },
+      {
+        text = snap.banner.detail ~= "" and (" — " .. snap.banner.detail) or "",
+        style = { fg = theme.muted },
+      },
+    })
+  end
+  if #snap.rows == 0 then
+    table.insert(children, 1, head_line(snap, width))
+    for _, l in ipairs(empty_state(snap, width)) do
+      children[#children + 1] = l
+    end
+    return { type = "box", fill = 1, children = children }
+  end
+  local w = widths(snap.columns, snap.rows, width - 3)
+  local header = cells_spans(snap.columns, w, nil, theme.muted)
+  table.insert(header, 1, { text = "  " })
+  children[#children + 1] = line(header)
+  local room = math.max(1, height - #children - 1)
+  local first = math.max(1, math.min(snap.selected - room + 1, #snap.rows - room + 1))
+  first = math.max(1, math.min(first, snap.selected))
+  local last = math.min(#snap.rows, first + room - 1)
+  table.insert(children, 1, head_line(snap, width, first, last))
+  for i = first, last do
+    local row = snap.rows[i]
+    local selected = i == snap.selected
+    local id = "row:" .. (row.name or i)
+    local spans
+    if selected then
+      spans = cells_spans(row.cells, w, nil, nil)
+    else
+      local base = snap.stale and theme.muted or theme.text
+      spans = cells_spans(row.cells, w, not snap.stale and row.tones or nil, base)
+    end
+    local marker_role = not selected and MARKER_ROLE[row.marker] or nil
+    table.insert(spans, 1, {
+      text = row.marker and (row.marker .. " ") or "  ",
+      style = { fg = marker_role and theme.role(marker_role) or nil, bold = row.marker ~= nil },
+    })
+    children[#children + 1] = line(spans, {
+      id = id,
+      style = selected and selection_bar() or (hover.id(id) and hover.row_style() or nil),
+    })
+  end
+  return { type = "box", fill = 1, children = children }
 end
 
 local function detail_body(snap, height)
@@ -221,47 +307,66 @@ local function note_body(note)
   return { type = "box", fill = 1, children = children }
 end
 
---- The footer: each hint is a button replaying its key.
-local function footer(hints)
+--- The footer: each hint is a button replaying its key, the chord in the
+--- key-hint colour as thurbox's own footers draw it. Hints marked optional
+--- give way first when the Lens is narrow.
+local function footer(hints, width)
+  local budget = width - 1
+  for _, h in ipairs(hints) do
+    budget = budget - widgets.len(h.chord .. " " .. h.label .. "  ")
+  end
   local spans = { { text = " " } }
-  for i, h in ipairs(hints) do
-    if i > 1 then
-      spans[#spans + 1] = { text = " · ", style = { fg = theme.muted } }
+  for i = #hints, 1, -1 do
+    if budget < 0 and hints[i].optional then
+      budget = budget + widgets.len(hints[i].chord .. " " .. hints[i].label .. "  ")
+      hints[i] = false
     end
-    local role = "key:" .. h[1]
-    spans[#spans + 1] = {
-      text = h[2],
-      role = role,
-      style = hover.style(role, hover.button_style(), { fg = theme.muted }),
-    }
+  end
+  for _, h in ipairs(hints) do
+    if h then
+      local role = "key:" .. h.key
+      local lit = hover.role(role)
+      spans[#spans + 1] = {
+        text = h.chord,
+        role = role,
+        style = lit and hover.button_style() or { fg = theme.hint },
+      }
+      spans[#spans + 1] = {
+        text = " " .. h.label,
+        role = role,
+        style = lit and hover.button_style() or { fg = theme.muted },
+      }
+      spans[#spans + 1] = { text = "  " }
+    end
   end
   return line(spans)
 end
 
-local LIST_HINTS = {
-  { "j", "j/k move" },
-  { "tab", "tab kind" },
-  { "shift+tab", "⇧tab back" },
-  { "enter", "enter view" },
-  { "shift+r", "R refresh" },
-  { "esc", "esc close" },
-}
-local NOTE_HINTS = { { "esc", "esc close" } }
-local DETAIL_HINTS = {
-  { "j", "j/k scroll" },
-  { "home", "g/G top/end" },
-  { "esc", "esc back" },
-}
+local function list_hints()
+  return {
+    { key = "j", chord = "j/k", label = "move" },
+    { key = "tab", chord = "tab", label = "kind" },
+    { key = "shift+tab", chord = "⇧tab", label = "back" },
+    { key = "home", chord = "g/G", label = "first/last", optional = true },
+    { key = "1", chord = "1-9", label = "jump to kind", optional = true },
+    { key = "enter", chord = "enter", label = "read" },
+    { key = "shift+r", chord = "R", label = "refresh", optional = true },
+    { key = "esc", chord = "esc", label = "close" },
+  }
+end
 
---- The whole float.
----@param ctx table
----@param snap table
----@return table
-function M.render(ctx, snap)
-  local height = M.height(ctx)
+local function detail_hints()
+  return {
+    { key = "j", chord = "j/k", label = "scroll" },
+    { key = "pagedown", chord = "PgDn/PgUp", label = "page", optional = true },
+    { key = "home", chord = "g/G", label = "top/end" },
+    { key = "shift+r", chord = "R", label = "refresh", optional = true },
+    { key = "esc", chord = "esc", label = "back" },
+  }
+end
+
+local function trail(snap, ctx)
   local sel = snap.rows[snap.selected]
-  -- The relations are links; the text before them gives way so they stay on
-  -- screen to be clicked.
   local links, room = {}, M.text_width(ctx)
   for i, r in ipairs(sel and sel.related or {}) do
     local gap = i == 1 and "  → " or "  "
@@ -275,40 +380,57 @@ function M.render(ctx, snap)
     }
     room = room - widgets.len(gap) - widgets.len(ref)
   end
-  local trail = { { text = " ", style = { fg = theme.muted } } }
+  local out = { { text = " ", style = { fg = theme.muted } } }
   if sel and sel.why then
     local why = widgets.truncate_hard(sel.marker .. " " .. sel.why, room)
-    trail = { { text = " " .. why, style = { fg = tone(MARKER_TONE[sel.marker]) } } }
+    out = { { text = " " .. why, style = { fg = theme.role(MARKER_ROLE[sel.marker]) } } }
   elseif sel then
     local name = widgets.truncate_hard(snap.kind .. "/" .. (sel.name or ""), room)
-    trail = { { text = " " .. name, style = { fg = theme.muted } } }
+    out = { { text = " " .. name, style = { fg = theme.muted } } }
   end
   for _, span in ipairs(links) do
-    trail[#trail + 1] = span
+    out[#out + 1] = span
   end
-  local body = {
-    line({
-      { text = " " .. snap.where, style = { fg = theme.muted } },
-      {
-        text = snap.version and ("  · fleet " .. snap.version) or "",
-        style = { fg = theme.muted },
-      },
-    }),
-    snap.note and note_body(snap.note) or snap.detail and detail_body(snap, height) or {
+  return line(out)
+end
+
+--- The whole float.
+---@param ctx table
+---@param snap table
+---@return table
+function M.render(ctx, snap)
+  local height = M.height(ctx)
+  local inner = M.inner_width(ctx)
+  local where = { { text = " " .. snap.where, style = { fg = theme.muted } } }
+  if snap.version then
+    where[#where + 1] = { text = " · fleet " .. snap.version, style = { fg = theme.muted } }
+  end
+  local body
+  if snap.note then
+    body = note_body(snap.note)
+  elseif snap.detail then
+    body = detail_body(snap, height)
+  else
+    body = {
       type = "box",
       axis = "horizontal",
       fill = 1,
-      children = { rail(snap), table_body(snap, height) },
-    },
-    line(trail),
-    footer(snap.note and NOTE_HINTS or snap.detail and DETAIL_HINTS or LIST_HINTS),
-  }
+      children = { rail(snap), separator(height), table_body(snap, height, inner - RAIL - 1) },
+    }
+  end
+  local hints = snap.note and { { key = "esc", chord = "esc", label = "close" } }
+    or (snap.detail and detail_hints() or list_hints())
+  local crumb = snap.detail and snap.detail.title or (not snap.note and snap.kind or nil)
+  local title = { { text = " Fleet Lens ", style = { fg = theme.accent, bold = true } } }
+  if crumb then
+    title[#title + 1] = { text = "· " .. crumb .. " ", style = { fg = theme.muted } }
+  end
   return {
     type = "box",
     float = { width = 92, height = 90 },
-    children = body,
+    children = { line(where), body, trail(snap, ctx), footer(hints, inner) },
     frame = {
-      title = { { text = " Fleet Lens ", style = { fg = theme.accent, bold = true } } },
+      title = title,
       border_type = "rounded",
       border_style = { fg = theme.role("border_focused") },
       style = { fg = theme.text, bg = theme.role("app_bg") },

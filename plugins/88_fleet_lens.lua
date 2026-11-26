@@ -20,6 +20,7 @@ local settings = require("lib.settings")
 
 local NAME = "fleetlens"
 local LIST_TTL = 3
+local COUNT_TTL = 10
 local SLOW_TTL = 300
 local TIMEOUT = 20
 
@@ -29,9 +30,11 @@ local TIMEOUT = 20
 local seen, said, good = {}, {}, {}
 -- The rail as last drawn, which `tab` steps through.
 local drawn_kinds = {}
--- The selected row per kind, and the run keys `R` asked to refresh. Upvalues:
--- `state` keeps what is assigned to it, not what is changed inside a table it
--- holds, so a nested `state.sel[kind] = n` would be lost.
+-- The selected row per kind, as `{ name, index }`, and the run keys `R` asked
+-- to refresh. Upvalues: `state` keeps what is assigned to it, not what is
+-- changed inside a table it holds, so a nested `state.sel[kind] = n` would be
+-- lost. The name keeps the selection on its resource when a refresh reorders
+-- the rows; the index stands in once that resource is gone.
 local selection, refreshing = {}, {}
 -- The names of the rows the last render drew, in order, which bound `j` and
 -- turn a clicked name into a position.
@@ -42,9 +45,13 @@ local drawn_names = {}
 local detail = nil
 -- How far the last resource drawn could scroll, which bounds `j`.
 local detail_max = 0
+local rows_per_page = 10
 -- A relation followed: its kind, the name to select once that kind's rows are
--- held, and whether to read it, as a link clicked while reading does.
+-- held, whether to read it, as a link clicked while reading does, and the host
+-- clock of the list held when it was clicked: only a later list can say the
+-- name is not there.
 local wanted = nil
+local rail_counts_key = nil
 
 local function setting(id, fallback)
   return settings.get(NAME, id, fallback)
@@ -114,6 +121,41 @@ local function kinds(w)
   return out, version and version.value.version or nil
 end
 
+local function count_kinds(w, list, kind, last, stale)
+  local names = {}
+  for i, k in ipairs(list) do
+    names[i] = k.kind
+  end
+  rail_counts_key = "fl:counts:" .. table.concat(names, ",")
+  local _, held = ask(rail_counts_key, source.count_command(w, names), COUNT_TTL, w)
+  local counts = held and source.counts(held.value, names) or {}
+  for _, k in ipairs(list) do
+    if k.kind == kind then
+      k.count = stale and "?" or (last and #last.value or nil)
+    else
+      k.count = counts[k.kind]
+    end
+  end
+end
+
+local function selected_index(kind, names)
+  local sel = selection[kind]
+  if not sel then
+    return 1
+  end
+  for i, name in ipairs(names) do
+    if name == sel.name then
+      return i
+    end
+  end
+  return math.max(1, math.min(sel.index, #names))
+end
+
+local function select_index(kind, names, i)
+  i = math.max(1, math.min(i, math.max(#names, 1)))
+  selection[kind] = { name = names[i], index = i }
+end
+
 local function untrusted(ctx)
   return view.render(ctx, {
     where = "not trusted",
@@ -169,25 +211,31 @@ local function render(ctx)
   local kind = state.kind or "Task"
   local now_answer, last = ask("fl:list:" .. kind, source.list_command(w, kind), LIST_TTL, w)
   local rows = last and model.rows(kind, last.value, last.now) or {}
-  if wanted and (wanted.kind ~= kind or last) then
-    for i, row in ipairs(wanted.kind == kind and rows or {}) do
-      if row.name == wanted.name then
-        selection[kind] = i
-        detail = wanted.read and start_reading(kind, row.name) or nil
-      end
-    end
-    wanted = nil
-  end
-  for _, k in ipairs(list) do
-    local held = good["fl:list:" .. k.kind]
-    k.count = held and #held.value or nil
-  end
-  local selected = math.max(1, math.min(selection[kind] or 1, #rows))
-  local banner = now_answer.kind == "error" and now_answer or nil
   drawn_names = {}
   for i, row in ipairs(rows) do
     drawn_names[i] = row.name
   end
+  if wanted and wanted.kind ~= kind then
+    wanted = nil
+  elseif wanted and last then
+    for i, row in ipairs(rows) do
+      if row.name == wanted.name then
+        selection[kind] = { name = row.name, index = i }
+        detail = wanted.read and start_reading(kind, row.name) or nil
+        wanted = nil
+        break
+      end
+    end
+    if wanted and last.now > wanted.after then
+      wanted = nil
+    end
+  end
+  count_kinds(w, list, kind, last, now_answer.kind == "error")
+  local selected = selected_index(kind, drawn_names)
+  if #rows > 0 then
+    select_index(kind, drawn_names, selected)
+  end
+  local banner = now_answer.kind == "error" and now_answer or nil
   local shown = nil
   if detail then
     for i, row in ipairs(rows) do
@@ -201,6 +249,7 @@ local function render(ctx)
       detail = nil
     end
   end
+  rows_per_page = detail and view.room(ctx) or view.rows_room(ctx)
   return view.render(ctx, {
     where = w.machine .. " · " .. (w.config ~= "" and w.config or "fleet's default config"),
     version = version,
@@ -223,7 +272,12 @@ local function move(delta)
     return
   end
   local kind = state.kind or "Task"
-  selection[kind] = math.max(1, math.min((selection[kind] or 1) + delta, math.max(#drawn_names, 1)))
+  local from = selected_index(kind, drawn_names)
+  if delta == math.huge or delta == -math.huge then
+    from = 0
+    delta = delta > 0 and #drawn_names or 1
+  end
+  select_index(kind, drawn_names, from + delta)
 end
 
 --- Step `step` kinds along the rail, wrapping either way.
@@ -238,6 +292,13 @@ local function step_kind(step)
   end
 end
 
+local function nth_kind(n)
+  local k = drawn_kinds[n]
+  if k and not detail then
+    state.kind = k.kind
+  end
+end
+
 --- Read the selected row's resource, from the list already held.
 local function open_detail()
   local kind = state.kind or "Task"
@@ -246,7 +307,11 @@ local function open_detail()
     return
   end
   local rows = model.rows(kind, held.value, held.now)
-  local row = rows[math.max(1, math.min(selection[kind] or 1, #rows))]
+  local names = {}
+  for i, r in ipairs(rows) do
+    names[i] = r.name
+  end
+  local row = rows[selected_index(kind, names)]
   if row then
     detail = start_reading(kind, row.name)
   end
@@ -264,7 +329,7 @@ end
 local function select_name(name)
   for i, n in ipairs(drawn_names) do
     if n == name then
-      selection[state.kind or "Task"] = i
+      selection[state.kind or "Task"] = { name = n, index = i }
       return true
     end
   end
@@ -274,7 +339,10 @@ end
 --- Go to the resource a relation names: its kind, then its row once listed.
 local function follow(kind, name)
   if type(kind) == "string" and type(name) == "string" then
-    wanted = { kind = kind, name = name, read = detail ~= nil }
+    local key = "fl:list:" .. kind
+    local held = good[key]
+    wanted = { kind = kind, name = name, read = detail ~= nil, after = held and held.now or -1 }
+    refreshing[key] = true
     state.kind = kind
     detail = nil
   end
@@ -291,6 +359,9 @@ local function refresh()
   if detail then
     refreshing[get_key(kind, detail.name)] = true
   end
+  if rail_counts_key then
+    refreshing[rail_counts_key] = true
+  end
   refreshing["fl:version"] = true
   refreshing["fl:plugins"] = true
 end
@@ -303,10 +374,10 @@ local ACTIONS = {
     move(-1)
   end,
   ["fleetlens.page_down"] = function()
-    move(10)
+    move(rows_per_page)
   end,
   ["fleetlens.page_up"] = function()
-    move(-10)
+    move(-rows_per_page)
   end,
   ["fleetlens.first"] = function()
     move(-math.huge)
@@ -319,6 +390,16 @@ local ACTIONS = {
   end,
   ["fleetlens.kind_back"] = function()
     step_kind(-1)
+  end,
+  ["fleetlens.kind_next_in_list"] = function()
+    if not detail then
+      step_kind(1)
+    end
+  end,
+  ["fleetlens.kind_back_in_list"] = function()
+    if not detail then
+      step_kind(-1)
+    end
   end,
   ["fleetlens.view"] = function(args)
     if not args.name or select_name(args.name) then
@@ -358,6 +439,10 @@ local KEYS = {
   G = "fleetlens.last",
   tab = "fleetlens.kind",
   backtab = "fleetlens.kind_back",
+  l = "fleetlens.kind_next_in_list",
+  right = "fleetlens.kind_next_in_list",
+  h = "fleetlens.kind_back_in_list",
+  left = "fleetlens.kind_back_in_list",
   enter = "fleetlens.view",
   R = "fleetlens.refresh",
   esc = "fleetlens.close",
@@ -446,8 +531,11 @@ return {
       name = "R"
     end
     local action = KEYS[name] or KEYS[key.key]
+    local digit = type(name) == "string" and name:match("^[1-9]$")
     if action then
       ACTIONS[action]({})
+    elseif digit and not key.ctrl and not key.alt then
+      nth_kind(tonumber(digit))
     end
     -- A float takes every key; swallow the rest rather than let them type.
     return true

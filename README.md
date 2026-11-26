@@ -4,9 +4,9 @@ A [thurbox](https://github.com/Thurbeen/thurbox) pane that browses
 [Fleet](https://github.com/Thurbeen/thurbox/tree/main/docs/fleet) v3 resources:
 every kind Fleet serves, Tasks first, in one keyboard-first float.
 
-![Fleet Lens in thurbox's Doom theme: Alt+K opens it on four Tasks, the two that need a person on top, one whose session is gone and one asking a Question; j moves down to the shipped Task and its ChangeRequest link; enter reads it as YAML and j and G scroll it; tab steps through the kinds to the ChangeRequest, named by its pull request, and shift+tab steps back; esc closes it](media/demo.gif)
+![Fleet Lens in thurbox's Doom theme: Alt+K opens it on four Tasks, every kind on the rail already counted, the two Tasks that need a person on top, one whose session is gone and one asking a Question; j moves the selection bar down to the shipped Task and its ChangeRequest link; enter reads it as YAML and j and G scroll it; tab steps through the kinds to the ChangeRequest, named by its pull request, and shift+tab steps back; esc closes it](media/demo.gif)
 
-The recording is thurbox and Fleet 3.1.0 with a throwaway HOME and a scratch
+The recording is thurbox and Fleet 3.29.1 with a throwaway HOME and a scratch
 Fleet store on the fake runtime, so no agent runs and nothing real is read.
 Reproduce it with `demo/record.sh`.
 
@@ -33,8 +33,10 @@ commands.
 | --- | --- |
 | `Alt+K` | Open or close the Lens (also in the palette as "Fleet: open Lens") |
 | `j` / `k`, `↓` / `↑`, the wheel | Move, or scroll a resource |
-| `PgDn` / `PgUp`, `g` / `G`, `Home` / `End` | Ten rows, or to the first / last |
+| `PgDn` / `PgUp`, `g` / `G`, `Home` / `End` | A screenful, or to the first / last |
 | `tab` / `shift+tab`, `Ctrl+L` / `Ctrl+H` | Next / previous kind |
+| `l` / `h`, `→` / `←` | Next / previous kind, from the table |
+| `1` … `9` | The kind at that place on the rail |
 | `enter` | Read the selected resource as YAML |
 | `R` | Ask fleet again now |
 | `esc`, `q` | Back from a resource; close |
@@ -42,6 +44,14 @@ commands.
 The mouse works too: click a kind or a row to select it, double-click a row
 to read it, turn the wheel to move or to scroll a resource, click a hint in
 the footer to do what it says, and click outside the Lens to close it.
+
+The rail counts every kind as soon as the Lens opens: the selected kind from
+its own list, every other from one run that asks `fleet list` for each kind
+and sends back only the counts, every 10 seconds and on `R`. `…` is a count
+not in yet, `?` one fleet could not tell.
+
+The selection stays on its resource when a refresh reorders the rows, and the
+title names the kind or the resource on screen.
 
 The line under the table links what the selected resource names: a Task's
 TaskConfig and the resources it declared (its ChangeRequests), a TaskConfig's
@@ -78,6 +88,24 @@ Then open work, then what is settled (Concluded, Settled), newest first.
 A ChangeRequest also gets CHANGE: its pull request as `owner/repo#N`, or its
 merge request as `group/project!N`.
 
+NAME takes what the other columns leave, and a longer name is cut with `…`;
+the line under the table spells it whole.
+
+Colours are thurbox theme roles, never fixed colours, so they follow the
+theme you pick, light or dark. Only what is worth a look is coloured:
+
+| Role | Marks |
+| --- | --- |
+| `danger` | A `!` Task, a brief generation behind its spec |
+| `status_error` | A `Stalled` phase, a `Lost` or `Gone` session, a `failed` result |
+| `status_blocked` | A `?` Task, an agent asking for `attention`, a `stuck` result |
+| `status_working` | A `working` agent, a resource whose status lags its spec (`±`) |
+| `status_done` | A `Concluded` or `Settled` phase, a `shipped` result |
+| `status_idle`, `status_unknown`, `text_muted` | An idle or unknown agent; a `Pending` phase, a `Paused` session |
+
+The selected row wears thurbox's own selection bar (`selection_bg` /
+`selection_fg`), as its sidebar does.
+
 Every other kind gets NAME, PHASE, COND (one glyph per condition: `●` True,
 `○` False, `?` Unknown), SYNC (`✓` when the status observed the current
 generation, `±` when not) and AGE.
@@ -106,6 +134,8 @@ In Settings, under `fleetlens`:
 - Relations go one way: a ChangeRequest does not link back to its Task.
 - No filter or attach yet.
 - One `fleet list --json` per refresh, which a thurbox run caps at 256 KiB.
+  The rail's counts are one more run, which lists every kind on the host and
+  sends back only the counts.
   The host trims it with `awk` to the fields the table reads and drops long
   strings, which leaves about 2 KiB a Task. Past the cap, the Lens says so
   instead of parsing a cut answer.

@@ -137,6 +137,48 @@ test("a list keeps an empty answer and fleet's failure", function()
   eq(c.title, "Store unreadable")
 end)
 
+local function count_through(json_text, exit, kinds)
+  local cmd = source.count_command({ bin = FAKE, config = "" }, kinds)
+  local pipe = assert(
+    io.popen(
+      string.format(
+        "FAKE_EXIT=%d FAKE_JSON=%s sh -c %s",
+        exit or 0,
+        source.quote(json_text),
+        source.quote(cmd)
+      )
+    )
+  )
+  local out = pipe:read("a")
+  local _, _, status = pipe:close()
+  local got =
+    source.classify({ state = "done", status = status, stdout = out, stderr = "" }, "local")
+  return got.kind == "ok" and source.counts(got.value, kinds) or got
+end
+
+local TWO = '[\n  {\n    "a": [\n      {\n        "b": 1\n      }\n    ]\n  },\n  {}\n]'
+
+test("one run counts every kind, top-level objects only", function()
+  local counts = count_through(TWO, 0, { "Task", "TaskConfig" })
+  eq(counts.Task, 2)
+  eq(counts.TaskConfig, 2)
+end)
+
+test("an empty list counts zero", function()
+  eq(count_through("[]", 0, { "Board" }).Board, 0)
+end)
+
+test("a kind fleet cannot list is not counted, never zero", function()
+  local counts = count_through("", 4, { "Task", "Board" })
+  eq(counts.Task, "?")
+  eq(counts.Board, "?")
+end)
+
+test("counts of an unreadable answer are all unknown", function()
+  eq(source.counts({ 1 }, { "Task", "Board" }).Board, "?")
+  eq(source.counts("x", { "Task" }).Task, "?")
+end)
+
 test("quote escapes a single quote", function()
   eq(source.quote("it's"), "'it'\\''s'")
 end)
@@ -308,7 +350,9 @@ test("task cells: agent, session, generation, result, changes", function()
   eq(c[3], "idle")
   eq(c[4], "Paused")
   eq(c[5], "1/2")
-  eq(rows[1].tones[5], "error", "a brief generation behind the spec")
+  eq(rows[1].tones[5], "danger", "a brief generation behind the spec")
+  eq(rows[1].tones[2], "status_done", "a settled phase")
+  eq(rows[1].tones[6], "status_done", "a shipped result")
   eq(c[6], "shipped")
   eq(c[7], "1")
   eq(c[8], "1m")
@@ -323,7 +367,7 @@ test("a session on another place names it", function()
     }),
   }, 0)
   eq(rows[1].cells[3], "attention")
-  eq(rows[1].tones[3], "warning")
+  eq(rows[1].tones[3], "status_blocked")
   eq(rows[1].cells[4], "exec/nixos Running")
 end)
 
@@ -333,9 +377,51 @@ test("a lost session is an error, none is a dash", function()
     task("none", "Pending", 0),
   }, 0)
   eq(rows[1].cells[4], "Lost")
-  eq(rows[1].tones[4], "error")
+  eq(rows[1].tones[4], "status_error")
   eq(rows[2].cells[3], "-")
   eq(rows[2].cells[4], "-")
+end)
+
+local ROLES = {}
+for role in
+  assert(io.open(os.getenv("THURBOX_YML"))):read("a"):gmatch("thurbox%.theme%.roles%.([%w_]+):")
+do
+  ROLES[role] = true
+end
+
+test("a working agent wears thurbox's status role; a running session stays plain", function()
+  local row = model.rows("Task", {
+    task("t", "Briefed", 0, {
+      agentState = "working",
+      sessionState = "Running",
+      session = { host = "local" },
+    }),
+  }, 0)[1]
+  eq(row.tones[3], "status_working")
+  eq(row.tones[4], nil, "a running session is the normal case")
+end)
+
+test("every tone is a thurbox theme role", function()
+  local rows = model.rows("Task", {
+    task("a", "Stalled", 1, { agentState = "unknown", sessionState = "Gone", session = {} }),
+    task("b", "Pending", 0, { agentState = "idle", sessionState = "Paused", session = {} }),
+    task("c", "Concluded", 0, { result = { outcome = "stuck" } }),
+    task("d", "Concluded", 0, { result = { outcome = "failed" } }),
+  }, 0)
+  for _, kind in ipairs({ "Board", "ChangeRequest" }) do
+    for _, row in ipairs(model.rows(kind, { { metadata = { name = "x", generation = 2 } } }, 0)) do
+      rows[#rows + 1] = row
+    end
+  end
+  local checked = 0
+  for _, row in ipairs(rows) do
+    for _, role in pairs(row.tones) do
+      checked = checked + 1
+      eq(ROLES[role], true, "role " .. role)
+    end
+  end
+  eq(checked > 8, true, "tones checked")
+  eq(ROLES.status_done, true, "the roles thurbox.yml declares")
 end)
 
 test("a ChangeRequest names its change", function()
